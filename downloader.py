@@ -13,12 +13,21 @@ USER_AGENTS = [
 ]
 
 def setup_cookies():
+    cookie_path = "cookies.txt"
     cookies_content = os.getenv("IG_COOKIES")
     if cookies_content:
-        cookie_path = "cookies.txt"
         with open(cookie_path, "w") as f:
             f.write(cookies_content)
         return cookie_path
+    
+    session_id = os.getenv("IG_SESSIONID")
+    if session_id:
+        netscape_cookie = f".instagram.com\tTRUE\t/\tTRUE\t253402300799\tsessionid\t{session_id}\n"
+        with open(cookie_path, "w") as f:
+            f.write("# Netscape HTTP Cookie File\n")
+            f.write(netscape_cookie)
+        return cookie_path
+        
     return None
 
 COOKIE_FILE = setup_cookies()
