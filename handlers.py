@@ -1,5 +1,7 @@
 import os
 import re
+import hashlib
+from aiocache import Cache
 from aiogram import Router, F
 from aiogram.types import Message, FSInputFile, InputMediaVideo, InputMediaPhoto
 from aiogram.filters import CommandStart, Command
@@ -13,7 +15,7 @@ URL_PATTERN = re.compile(
     r'(https?://(?:www\.)?(?:instagram\.com|tiktok\.com|youtube\.com|youtu\.be|x\.com|twitter\.com|facebook\.com|pin\.it|pinterest\.com)[^\s]+)'
 )
 
-MEDIA_CACHE = {}
+MEDIA_CACHE = Cache(Cache.MEMORY, ttl=3600)
 CAPTION_TEXT = "📥 @VidSaveUzBot orqali yuklab olindi"
 ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "").split(",") if id]
 SUPER_ADMIN_ID = 7890020641
@@ -53,14 +55,23 @@ async def cmd_users(message: Message):
 @router.message(F.text.regexp(URL_PATTERN).as_("url_match"))
 async def handle_media_url(message: Message, url_match: re.Match):
     url = url_match.group(1)
+    url_hash = hashlib.md5(url.encode()).hexdigest()
     
-    if url in MEDIA_CACHE:
-        cached_id = MEDIA_CACHE[url]
+    cached_data = await MEDIA_CACHE.get(url_hash)
+    if cached_data:
         try:
-            try:
-                await message.reply_video(video=cached_id, caption=CAPTION_TEXT)
-            except Exception:
-                await message.reply_document(document=cached_id, caption=CAPTION_TEXT)
+            if cached_data['type'] == 'photo':
+                await message.reply_photo(photo=cached_data['id'], caption=CAPTION_TEXT)
+            elif cached_data['type'] == 'video':
+                await message.reply_video(video=cached_data['id'], caption=CAPTION_TEXT)
+            elif cached_data['type'] == 'group':
+                media_group = []
+                for i, item in enumerate(cached_data['items']):
+                    if item['type'] == 'photo':
+                        media_group.append(InputMediaPhoto(media=item['id'], caption=CAPTION_TEXT if i == 0 else None))
+                    else:
+                        media_group.append(InputMediaVideo(media=item['id'], caption=CAPTION_TEXT if i == 0 else None))
+                await message.answer_media_group(media=media_group, reply_to_message_id=message.message_id)
             return
         except Exception:
             pass
@@ -84,11 +95,11 @@ async def handle_media_url(message: Message, url_match: re.Match):
                 if is_photo:
                     sent_msg = await message.reply_photo(photo=media, caption=CAPTION_TEXT)
                     if sent_msg.photo:
-                        MEDIA_CACHE[url] = sent_msg.photo[-1].file_id
+                        await MEDIA_CACHE.set(url_hash, {'type': 'photo', 'id': sent_msg.photo[-1].file_id})
                 else:
                     sent_msg = await message.reply_video(video=media, caption=CAPTION_TEXT)
                     if sent_msg.video:
-                        MEDIA_CACHE[url] = sent_msg.video.file_id
+                        await MEDIA_CACHE.set(url_hash, {'type': 'video', 'id': sent_msg.video.file_id})
             else:
                 media_group = []
                 for i, res in enumerate(results[:10]):
@@ -98,7 +109,16 @@ async def handle_media_url(message: Message, url_match: re.Match):
                     else:
                         media_group.append(InputMediaVideo(media=media, caption=CAPTION_TEXT if i == 0 else None))
                 
-                await message.answer_media_group(media=media_group, reply_to_message_id=message.message_id)
+                sent_msgs = await message.answer_media_group(media=media_group, reply_to_message_id=message.message_id)
+                if sent_msgs:
+                    cached_items = []
+                    for msg in sent_msgs:
+                        if msg.photo:
+                            cached_items.append({'type': 'photo', 'id': msg.photo[-1].file_id})
+                        elif msg.video:
+                            cached_items.append({'type': 'video', 'id': msg.video.file_id})
+                    if cached_items:
+                        await MEDIA_CACHE.set(url_hash, {'type': 'group', 'items': cached_items})
 
             for res in results:
                 if os.path.exists(res['filepath']):

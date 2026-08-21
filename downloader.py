@@ -34,10 +34,14 @@ COOKIE_FILE = setup_cookies()
 
 def get_base_opts():
     opts = {
-        'format': 'bestvideo[filesize<=50M][ext=mp4]+bestaudio[ext=m4a]/best[filesize<=50M][ext=mp4]/best',
+        'format': 'best[ext=mp4][filesize<=50M]/bestvideo[ext=mp4][filesize<=50M]+bestaudio[ext=m4a]/best[filesize<=50M]/best',
         'noplaylist': False,
         'quiet': True,
         'no_warnings': True,
+        'nocheckcertificate': True,
+        'writesubtitles': False,
+        'writeautomaticsub': False,
+        'writethumbnail': False,
         'nocheckcertificate': True,
         'http_headers': {
             'User-Agent': random.choice(USER_AGENTS),
