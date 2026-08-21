@@ -105,7 +105,7 @@ async def handle_media_url(message: Message, url_match: re.Match):
                     os.remove(res['filepath'])
                     
     except Exception as e:
-        await message.reply(f"❌ Mediani yuklab olishda xatolik yuz berdi.\nXato: {str(e)[:100]}")
+        await message.reply("❌ Kechirasiz, media topilmadi yoki bu post yopiq/xususiy.")
     finally:
         try:
             await status_msg.delete()

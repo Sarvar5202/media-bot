@@ -12,8 +12,19 @@ USER_AGENTS = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
 ]
 
+def setup_cookies():
+    cookies_content = os.getenv("IG_COOKIES")
+    if cookies_content:
+        cookie_path = "cookies.txt"
+        with open(cookie_path, "w") as f:
+            f.write(cookies_content)
+        return cookie_path
+    return None
+
+COOKIE_FILE = setup_cookies()
+
 def get_base_opts():
-    return {
+    opts = {
         'format': 'bestvideo[filesize<=50M][ext=mp4]+bestaudio[ext=m4a]/best[filesize<=50M][ext=mp4]/best',
         'noplaylist': False,
         'quiet': True,
@@ -31,7 +42,11 @@ def get_base_opts():
         'sleep_interval_requests': 1,
         'sleep_interval': 1,
         'max_sleep_interval': 3,
+        'socket_timeout': 30, # Optimization for faster fallback
     }
+    if COOKIE_FILE:
+        opts['cookiefile'] = COOKIE_FILE
+    return opts
 
 async def download_media(url: str) -> list[dict]:
     def _download():
@@ -92,4 +107,5 @@ async def download_media(url: str) -> list[dict]:
             raise last_error
         return []
 
+    # Process extraction in a non-blocking asynchronous thread so the bot loop doesn't freeze
     return await asyncio.to_thread(_download)
