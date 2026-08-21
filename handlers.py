@@ -7,8 +7,10 @@ from aiogram.types import Message, FSInputFile, InputMediaVideo, InputMediaPhoto
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.chat_action import ChatActionSender
 from aiogram.exceptions import TelegramForbiddenError
+from locales import TEXTS
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from downloader import download_media
-from db import add_user, get_stats, get_user_info, set_user_inactive, get_all_active_users, get_all_users
+from db import add_user, get_stats, get_user_info, set_user_inactive, get_all_active_users, get_all_users, get_user_language, set_user_language, increment_platform_stat, get_platform_stats
 from config import config
 import io
 import time
@@ -19,6 +21,15 @@ router = Router()
 URL_PATTERN = re.compile(
     r'(https?://(?:www\.)?(?:instagram\.com|tiktok\.com|youtube\.com|youtu\.be|x\.com|twitter\.com|facebook\.com|pin\.it|pinterest\.com)[^\s]+)'
 )
+
+USER_LANGS = {}
+
+async def get_text(user_id: int, key: str) -> str:
+    lang = USER_LANGS.get(user_id)
+    if not lang:
+        lang = await get_user_language(user_id)
+        USER_LANGS[user_id] = lang
+    return TEXTS.get(lang, TEXTS['uz'])[key]
 
 class SmartCache:
     def __init__(self, ttl=3600, max_items=1000):
@@ -58,35 +69,43 @@ async def cache_cleanup_task():
         except Exception:
             pass
 
-CAPTION_TEXT = "📥 @VidSaveUzBot orqali yuklab olindi"
+
 
 def is_admin(user_id: int) -> bool:
     if config.admin_id and user_id == config.admin_id:
         return True
     return False
 
+@router.message(Command("language"))
+async def cmd_language(message: Message):
+    text = await get_text(message.from_user.id, 'lang_prompt')
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🇺🇿 O'zbekcha", callback_data="lang_uz")],
+        [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru")],
+        [InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en")]
+    ])
+    await message.reply(text, reply_markup=markup)
+
+@router.callback_query(F.data.startswith("lang_"))
+async def process_lang(callback: CallbackQuery):
+    lang_code = callback.data.split("_")[1]
+    await set_user_language(callback.from_user.id, lang_code)
+    USER_LANGS[callback.from_user.id] = lang_code
+    
+    success_text = await get_text(callback.from_user.id, 'lang_set')
+    await callback.message.edit_text(success_text)
+    await callback.answer()
+
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     await add_user(message.from_user.id, message.from_user.username)
-    await message.reply("👋 Assalomu alaykum! Menga Instagram, TikTok, YouTube, X/Twitter, Pinterest yoki Facebook havolasini yuboring, uni darhol yuklab beraman. 🚀")
+    text = await get_text(message.from_user.id, 'start')
+    await message.reply(text)
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    text = (
-        "💡 <b>Botdan qanday foydalanish kerak?</b>\n\n"
-        "Shunchaki, yuklab olmoqchi bo'lgan media (video, rasm yoki audio) havolasini (linkini) yuboring. Men uni sizga eng yuqori sifatda, tezkorlik bilan yuklab beraman.\n\n"
-        "🌐 <b>Qo'llab-quvvatlanadigan tarmoqlar:</b>\n"
-        "• Instagram (Reels, Post, IGTV)\n"
-        "• TikTok\n"
-        "• YouTube (Shorts, Video)\n"
-        "• X (Twitter)\n"
-        "• Facebook\n"
-        "• Pinterest\n\n"
-        "<i>⚠️ Eslatma: Yuklab olinadigan fayl hajmi 50MB dan oshmasligi kerak.</i>\n\n"
-        "👨‍💻 <b>Dasturchi bilan bog'lanish:</b>\n"
-        "Takliflar, savollar yoki xatoliklar bo'lsa murojaat qiling: <a href='https://t.me/ssamariddinovv'>@ssamariddinovv</a>"
-    )
-    await message.reply(text, parse_mode="HTML")
+    text = await get_text(message.from_user.id, 'help')
+    await message.reply(text, parse_mode="HTML", disable_web_page_preview=True)
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message):
@@ -94,12 +113,24 @@ async def cmd_stats(message: Message):
         return
     
     stats = await get_stats()
+    platform_stats = await get_platform_stats()
+    
     text = (
         f"📊 <b>Bot statistikasi</b>:\n\n"
         f"👥 Jami foydalanuvchilar: {stats['total']}\n"
         f"✅ Faol foydalanuvchilar: {stats['active']}\n"
-        f"📈 Oxirgi 24 soatda: +{stats['new_24h']}"
+        f"📈 Oxirgi 24 soatda: +{stats['new_24h']}\n\n"
+        f"🌐 <b>Platformalar (yuklashlar):</b>\n"
     )
+    
+    total_downloads = sum(platform_stats.values()) if platform_stats else 0
+    if total_downloads > 0:
+        for plat, count in platform_stats.items():
+            pct = (count / total_downloads) * 100
+            text += f"• {plat}: {count} ({pct:.1f}%)\n"
+    else:
+        text += "Hali ma'lumot yo'q.\n"
+        
     await message.reply(text, parse_mode="HTML")
 
 @router.message(Command("users"))
@@ -189,26 +220,39 @@ async def handle_media_url(message: Message, url_match: re.Match):
     url = url_match.group(1)
     url_hash = hashlib.md5(url.encode()).hexdigest()
     
+    platform = 'Boshqa'
+    url_lower = url.lower()
+    if 'instagram.com' in url_lower: platform = 'Instagram'
+    elif 'tiktok.com' in url_lower: platform = 'TikTok'
+    elif 'youtube.com' in url_lower or 'youtu.be' in url_lower: platform = 'YouTube'
+    elif 'twitter.com' in url_lower or 'x.com' in url_lower: platform = 'X/Twitter'
+    elif 'facebook.com' in url_lower or 'fb.watch' in url_lower: platform = 'Facebook'
+    elif 'pinterest.com' in url_lower or 'pin.it' in url_lower: platform = 'Pinterest'
+    
+    await increment_platform_stat(platform)
+    
+    caption_text = await get_text(message.from_user.id, 'caption')
+    
     cached_data = await MEDIA_CACHE.get(url_hash)
     if cached_data:
         try:
             if cached_data['type'] == 'photo':
-                await message.reply_photo(photo=cached_data['id'], caption=CAPTION_TEXT)
+                await message.reply_photo(photo=cached_data['id'], caption=caption_text)
             elif cached_data['type'] == 'video':
-                await message.reply_video(video=cached_data['id'], caption=CAPTION_TEXT)
+                await message.reply_video(video=cached_data['id'], caption=caption_text)
             elif cached_data['type'] == 'group':
                 media_group = []
                 for i, item in enumerate(cached_data['items']):
                     if item['type'] == 'photo':
-                        media_group.append(InputMediaPhoto(media=item['id'], caption=CAPTION_TEXT if i == 0 else None))
+                        media_group.append(InputMediaPhoto(media=item['id'], caption=caption_text if i == 0 else None))
                     else:
-                        media_group.append(InputMediaVideo(media=item['id'], caption=CAPTION_TEXT if i == 0 else None))
+                        media_group.append(InputMediaVideo(media=item['id'], caption=caption_text if i == 0 else None))
                 await message.answer_media_group(media=media_group, reply_to_message_id=message.message_id)
             return
         except Exception:
             pass
 
-    status_msg = await message.reply("⏳")
+    status_msg = await message.reply(await get_text(message.from_user.id, "wait"))
     results = []
     
     try:
@@ -216,7 +260,7 @@ async def handle_media_url(message: Message, url_match: re.Match):
             results = await download_media(url)
             
             if not results:
-                await message.reply("❌ Hech qanday media topilmadi yoki fayl hajmi juda katta (>50MB).")
+                await message.reply(await get_text(message.from_user.id, "too_large"))
                 return
             
             if len(results) == 1:
@@ -235,11 +279,11 @@ async def handle_media_url(message: Message, url_match: re.Match):
                     media = FSInputFile(filepath)
                 
                 if is_photo:
-                    sent_msg = await message.reply_photo(photo=media, caption=CAPTION_TEXT)
+                    sent_msg = await message.reply_photo(photo=media, caption=caption_text)
                     if sent_msg.photo:
                         await MEDIA_CACHE.set(url_hash, {'type': 'photo', 'id': sent_msg.photo[-1].file_id})
                 else:
-                    sent_msg = await message.reply_video(video=media, caption=CAPTION_TEXT)
+                    sent_msg = await message.reply_video(video=media, caption=caption_text)
                     if sent_msg.video:
                         await MEDIA_CACHE.set(url_hash, {'type': 'video', 'id': sent_msg.video.file_id})
             else:
@@ -257,9 +301,9 @@ async def handle_media_url(message: Message, url_match: re.Match):
                         media = FSInputFile(filepath)
                         
                     if res['ext'] in ['jpg', 'jpeg', 'png', 'webp']:
-                        media_group.append(InputMediaPhoto(media=media, caption=CAPTION_TEXT if i == 0 else None))
+                        media_group.append(InputMediaPhoto(media=media, caption=caption_text if i == 0 else None))
                     else:
-                        media_group.append(InputMediaVideo(media=media, caption=CAPTION_TEXT if i == 0 else None))
+                        media_group.append(InputMediaVideo(media=media, caption=caption_text if i == 0 else None))
                 
                 sent_msgs = await message.answer_media_group(media=media_group, reply_to_message_id=message.message_id)
                 if sent_msgs:
@@ -273,7 +317,7 @@ async def handle_media_url(message: Message, url_match: re.Match):
                         await MEDIA_CACHE.set(url_hash, {'type': 'group', 'items': cached_items})
                     
     except Exception as e:
-        await message.reply("❌ Kechirasiz, media topilmadi yoki bu post yopiq/xususiy.")
+        await message.reply(await get_text(message.from_user.id, "error"))
     finally:
         for res in results:
             if res and 'filepath' in res and os.path.exists(res['filepath']):

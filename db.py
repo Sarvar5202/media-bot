@@ -22,6 +22,17 @@ async def init_db():
                     last_active TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            try:
+                await conn.execute("ALTER TABLE users ADD COLUMN lang VARCHAR(10) DEFAULT 'uz'")
+            except asyncpg.exceptions.DuplicateColumnError:
+                pass
+            
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS platform_stats (
+                    platform VARCHAR(50) PRIMARY KEY,
+                    downloads BIGINT DEFAULT 0
+                )
+            """)
     except Exception as e:
         logging.error(f"Failed to initialize database: {e}")
 
@@ -39,6 +50,47 @@ async def add_user(user_id: int, username: str = None):
             """, user_id, username)
     except Exception as e:
         logging.error(f"Error adding user: {e}")
+
+async def set_user_language(user_id: int, lang: str):
+    if not pool: return
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("UPDATE users SET lang = $1 WHERE user_id = $2", lang, user_id)
+    except Exception as e:
+        logging.error(f"Error setting language: {e}")
+
+async def get_user_language(user_id: int) -> str:
+    if not pool: return 'uz'
+    try:
+        async with pool.acquire() as conn:
+            val = await conn.fetchval("SELECT lang FROM users WHERE user_id = $1", user_id)
+            return val if val else 'uz'
+    except Exception as e:
+        logging.error(f"Error getting language: {e}")
+        return 'uz'
+
+async def increment_platform_stat(platform: str):
+    if not pool: return
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO platform_stats (platform, downloads) 
+                VALUES ($1, 1)
+                ON CONFLICT (platform) DO UPDATE 
+                SET downloads = platform_stats.downloads + 1
+            """, platform)
+    except Exception as e:
+        logging.error(f"Error incrementing platform stat: {e}")
+
+async def get_platform_stats() -> dict:
+    if not pool: return {}
+    try:
+        async with pool.acquire() as conn:
+            records = await conn.fetch("SELECT platform, downloads FROM platform_stats ORDER BY downloads DESC")
+            return {r['platform']: r['downloads'] for r in records}
+    except Exception as e:
+        logging.error(f"Error getting platform stats: {e}")
+        return {}
 
 async def get_stats() -> dict:
     if not pool: return {"total": 0, "active": 0, "new_24h": 0}

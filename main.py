@@ -30,6 +30,7 @@ async def setup_bot_commands(bot: Bot):
     public_commands = [
         BotCommand(command="start", description="Botni ishga tushirish"),
         BotCommand(command="help", description="Yordam va ma'lumot"),
+        BotCommand(command="language", description="Tilni o'zgartirish / Язык / Language"),
     ]
     await bot.set_my_commands(public_commands, scope=BotCommandScopeDefault())
     

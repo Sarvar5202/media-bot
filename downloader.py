@@ -35,9 +35,11 @@ COOKIE_FILE = setup_cookies()
 def get_base_opts():
     opts = {
         'format': 'bestvideo[ext=mp4][filesize<=50M]+bestaudio[ext=m4a]/best[ext=mp4][filesize<=50M]/best[filesize<=50M]/best',
+        'format_sort': ['res:1080', 'ext:mp4:m4a'], # Prevent container mismatches and prioritize compatibility
         'merge_output_format': 'mp4',
         'concurrent_fragment_downloads': 10,
-        'noplaylist': True, # Explicitly avoid playlists for faster single-video resolution
+        'sleep_interval_requests': 1, # Rate-limit bypass for manifest requests
+        'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
@@ -45,7 +47,7 @@ def get_base_opts():
         'writeautomaticsub': False,
         'writethumbnail': False,
         'postprocessor_args': {
-            'Merger': ['-threads', '0', '-preset', 'ultrafast'] # Optimized multi-threaded decoding/multiplexing
+            'Merger': ['-threads', '0', '-preset', 'ultrafast']
         },
         'http_headers': {
             'User-Agent': random.choice(USER_AGENTS),
