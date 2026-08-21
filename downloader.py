@@ -59,7 +59,7 @@ def get_base_opts():
             'Sec-Fetch-Mode': 'navigate'
         },
         'extractor_args': {
-            'youtube': ['player_client=android,web', 'player_skip=webpage'],
+            'youtube': ['player_client=android,mweb,web', 'player_skip=webpage'],
             'tiktok': ['api_hostname=api16-normal-c-useast1a.tiktokv.com', 'app_version=31.2.4']
         },
         'socket_timeout': 15,
@@ -90,7 +90,7 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                 opts['postprocessor_args'] = {
                     'ffmpeg': ['-af', 'volume=2.5,dynaudnorm', '-threads', '0']
                 }
-                opts['outtmpl'] = os.path.join(temp_dir, f'{dl_uuid}_%(extractor)s_%(id)s_%(playlist_index|)s.%(ext)s')
+                opts['outtmpl'] = os.path.join(temp_dir, 'VidSaveUzBot.%(ext)s')
             else:
                 opts['outtmpl'] = os.path.join(temp_dir, f'{dl_uuid}_%(extractor)s_%(id)s_%(playlist_index|)s.%(ext)s')
             
@@ -99,7 +99,7 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                 if 'instagram' in url:
                     opts['sleep_interval_requests'] = 2 * attempt
                 if 'youtube' in url:
-                    opts['extractor_args'] = {'youtube': ['player_client=ios,tv', 'player_skip=webpage']}
+                    opts['extractor_args'] = {'youtube': ['player_client=ios,tv,web', 'player_skip=webpage']}
 
             with yt_dlp.YoutubeDL(opts) as ydl:
                 try:
