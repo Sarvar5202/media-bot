@@ -3,21 +3,22 @@ import re
 import hashlib
 from aiocache import Cache
 from aiogram import Router, F
-from aiogram.types import Message, FSInputFile, InputMediaVideo, InputMediaPhoto
+from aiogram.types import Message, FSInputFile, InputMediaVideo, InputMediaPhoto, BufferedInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.chat_action import ChatActionSender
+from aiogram.exceptions import TelegramForbiddenError
 from downloader import download_media
-from db import add_user, get_users_count, get_all_users
+from db import add_user, get_stats, get_user_info, set_user_inactive, get_all_active_users
+from config import config
+import io
+import time
+import asyncio
 
 router = Router()
 
 URL_PATTERN = re.compile(
     r'(https?://(?:www\.)?(?:instagram\.com|tiktok\.com|youtube\.com|youtu\.be|x\.com|twitter\.com|facebook\.com|pin\.it|pinterest\.com)[^\s]+)'
 )
-
-import io
-import time
-import asyncio
 
 class SmartCache:
     def __init__(self, ttl=3600, max_items=1000):
@@ -58,12 +59,15 @@ async def cache_cleanup_task():
             pass
 
 CAPTION_TEXT = "📥 @VidSaveUzBot orqali yuklab olindi"
-ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "").split(",") if id]
-SUPER_ADMIN_ID = 7890020641
+
+def is_admin(user_id: int) -> bool:
+    if config.admin_id and user_id == config.admin_id:
+        return True
+    return False
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
-    add_user(message.from_user.id, message.from_user.username)
+    await add_user(message.from_user.id, message.from_user.username)
     await message.reply("👋 Assalomu alaykum! Menga Instagram, TikTok, YouTube, X/Twitter, Pinterest yoki Facebook havolasini yuboring, uni darhol yuklab beraman. 🚀")
 
 @router.message(Command("help"))
@@ -72,28 +76,85 @@ async def cmd_help(message: Message):
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message):
-    if not ADMIN_IDS or message.from_user.id in ADMIN_IDS or message.from_user.id == SUPER_ADMIN_ID:
-        count = get_users_count()
-        await message.reply(f"📊 Bot statistikasi:\nJami foydalanuvchilar: {count} ta")
-    else:
-        await message.reply("❌ Sizda bu buyruqdan foydalanish huquqi yo'q.")
-
-@router.message(Command("users"))
-async def cmd_users(message: Message):
-    if message.from_user.id != SUPER_ADMIN_ID:
+    if not is_admin(message.from_user.id):
         return
     
-    count = get_users_count()
-    users_list = get_all_users(50)
-    
-    text = f"📊 Jami foydalanuvchilar: {count} ta\n\nRo'yxat (oxirgi 50 ta):\n"
-    for uid, uname in users_list:
-        uname_text = f"@{uname}" if uname else "Mavjud emas"
-        text += f"🆔 {uid} | 👤 {uname_text}\n"
-    
-    await message.reply(text)
+    stats = await get_stats()
+    text = (
+        f"📊 <b>Bot statistikasi</b>:\n\n"
+        f"👥 Jami foydalanuvchilar: {stats['total']}\n"
+        f"✅ Faol foydalanuvchilar: {stats['active']}\n"
+        f"📈 Oxirgi 24 soatda: +{stats['new_24h']}"
+    )
+    await message.reply(text, parse_mode="HTML")
 
-from aiogram.types import BufferedInputFile
+@router.message(Command("user_info"))
+async def cmd_user_info(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+        
+    parts = message.text.split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        await message.reply("❌ Format: /user_info <telegram_id>")
+        return
+        
+    user_id = int(parts[1])
+    info = await get_user_info(user_id)
+    
+    if not info:
+        await message.reply("❌ Foydalanuvchi topilmadi.")
+        return
+        
+    status = "✅ Faol" if info['is_active'] else "❌ Nofaol"
+    uname = f"@{info['username']}" if info['username'] else "Mavjud emas"
+    
+    created_at_str = info['created_at'].strftime('%Y-%m-%d %H:%M') if info['created_at'] else "Noma'lum"
+    last_active_str = info['last_active'].strftime('%Y-%m-%d %H:%M') if info['last_active'] else "Noma'lum"
+    
+    text = (
+        f"👤 <b>Foydalanuvchi ma'lumotlari</b>:\n\n"
+        f"🆔 ID: <code>{info['user_id']}</code>\n"
+        f"👤 Username: {uname}\n"
+        f"Holat: {status}\n"
+        f"🕒 Qo'shilgan vaqti: {created_at_str}\n"
+        f"⏱ Oxirgi faollik: {last_active_str}"
+    )
+    await message.reply(text, parse_mode="HTML")
+
+@router.message(Command("broadcast"))
+async def cmd_broadcast(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+        
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.reply("❌ Format: /broadcast <xabar matni>")
+        return
+        
+    text_to_send = parts[1]
+    active_users = await get_all_active_users()
+    
+    if not active_users:
+        await message.reply("❌ Faol foydalanuvchilar topilmadi.")
+        return
+        
+    await message.reply(f"⏳ Xabar {len(active_users)} ta foydalanuvchiga yuborilmoqda...")
+    
+    sent_count = 0
+    blocked_count = 0
+    
+    for uid in active_users:
+        try:
+            await message.bot.send_message(chat_id=uid, text=text_to_send)
+            sent_count += 1
+            await asyncio.sleep(0.05)
+        except TelegramForbiddenError:
+            blocked_count += 1
+            await set_user_inactive(uid)
+        except Exception:
+            pass
+            
+    await message.reply(f"✅ Tarqatish yakunlandi!\n\nYetkazildi: {sent_count}\nBlokladi: {blocked_count}")
 
 @router.message(F.text.regexp(URL_PATTERN).as_("url_match"))
 async def handle_media_url(message: Message, url_match: re.Match):

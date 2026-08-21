@@ -25,7 +25,7 @@ async def start_web_server():
     logging.info(f"Web server started on port {port}")
 
 async def main():
-    init_db()
+    await init_db()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",

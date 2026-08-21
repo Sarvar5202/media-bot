@@ -1,7 +1,10 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
 
 class Settings(BaseSettings):
     bot_token: str
+    database_url: str = ""
+    admin_id: Optional[int] = None
     
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
