@@ -72,7 +72,21 @@ async def cmd_start(message: Message):
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    await message.reply("Shunchaki havolani yuboring! Men uni siz uchun yuklab beraman. (Maksimal hajmi 50MB)")
+    text = (
+        "💡 <b>Botdan qanday foydalanish kerak?</b>\n\n"
+        "Shunchaki, yuklab olmoqchi bo'lgan media (video, rasm yoki audio) havolasini (linkini) yuboring. Men uni sizga eng yuqori sifatda, tezkorlik bilan yuklab beraman.\n\n"
+        "🌐 <b>Qo'llab-quvvatlanadigan tarmoqlar:</b>\n"
+        "• Instagram (Reels, Post, IGTV)\n"
+        "• TikTok\n"
+        "• YouTube (Shorts, Video)\n"
+        "• X (Twitter)\n"
+        "• Facebook\n"
+        "• Pinterest\n\n"
+        "<i>⚠️ Eslatma: Yuklab olinadigan fayl hajmi 50MB dan oshmasligi kerak.</i>\n\n"
+        "👨‍💻 <b>Dasturchi bilan bog'lanish:</b>\n"
+        "Takliflar, savollar yoki xatoliklar bo'lsa murojaat qiling: <a href='https://t.me/ssamariddinovv'>@ssamariddinovv</a>"
+    )
+    await message.reply(text, parse_mode="HTML")
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message):
