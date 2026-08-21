@@ -36,14 +36,17 @@ def get_base_opts():
     opts = {
         'format': 'bestvideo[ext=mp4][filesize<=50M]+bestaudio[ext=m4a]/best[ext=mp4][filesize<=50M]/best[filesize<=50M]/best',
         'merge_output_format': 'mp4',
-        'concurrent_fragment_downloads': 5, # Multi-threaded fragment downloads
-        'noplaylist': False,
+        'concurrent_fragment_downloads': 10,
+        'noplaylist': True, # Explicitly avoid playlists for faster single-video resolution
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
         'writesubtitles': False,
         'writeautomaticsub': False,
         'writethumbnail': False,
+        'postprocessor_args': {
+            'Merger': ['-threads', '0', '-preset', 'ultrafast'] # Optimized multi-threaded decoding/multiplexing
+        },
         'http_headers': {
             'User-Agent': random.choice(USER_AGENTS),
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -53,7 +56,7 @@ def get_base_opts():
         'extractor_args': {
             'youtube': ['player_client=android,web', 'player_skip=webpage']
         },
-        'socket_timeout': 15, # Optimized for faster fallback
+        'socket_timeout': 15,
     }
     if COOKIE_FILE:
         opts['cookiefile'] = COOKIE_FILE
