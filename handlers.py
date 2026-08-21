@@ -5,7 +5,7 @@ from aiogram.types import Message, FSInputFile, InputMediaVideo, InputMediaPhoto
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.chat_action import ChatActionSender
 from downloader import download_media
-from db import add_user, get_users_count
+from db import add_user, get_users_count, get_all_users
 
 router = Router()
 
@@ -16,10 +16,11 @@ URL_PATTERN = re.compile(
 MEDIA_CACHE = {}
 CAPTION_TEXT = "📥 @VidSaveUzBot orqali yuklab olindi"
 ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "").split(",") if id]
+SUPER_ADMIN_ID = 7890020641
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
-    add_user(message.from_user.id)
+    add_user(message.from_user.id, message.from_user.username)
     await message.reply("👋 Assalomu alaykum! Menga Instagram, TikTok, YouTube, X/Twitter, Pinterest yoki Facebook havolasini yuboring, uni darhol yuklab beraman. 🚀")
 
 @router.message(Command("help"))
@@ -28,11 +29,26 @@ async def cmd_help(message: Message):
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message):
-    if not ADMIN_IDS or message.from_user.id in ADMIN_IDS:
+    if not ADMIN_IDS or message.from_user.id in ADMIN_IDS or message.from_user.id == SUPER_ADMIN_ID:
         count = get_users_count()
         await message.reply(f"📊 Bot statistikasi:\nJami foydalanuvchilar: {count} ta")
     else:
         await message.reply("❌ Sizda bu buyruqdan foydalanish huquqi yo'q.")
+
+@router.message(Command("users"))
+async def cmd_users(message: Message):
+    if message.from_user.id != SUPER_ADMIN_ID:
+        return
+    
+    count = get_users_count()
+    users_list = get_all_users(50)
+    
+    text = f"📊 Jami foydalanuvchilar: {count} ta\n\nRo'yxat (oxirgi 50 ta):\n"
+    for uid, uname in users_list:
+        uname_text = f"@{uname}" if uname else "Mavjud emas"
+        text += f"🆔 {uid} | 👤 {uname_text}\n"
+    
+    await message.reply(text)
 
 @router.message(F.text.regexp(URL_PATTERN).as_("url_match"))
 async def handle_media_url(message: Message, url_match: re.Match):
