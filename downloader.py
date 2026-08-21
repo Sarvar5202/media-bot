@@ -59,7 +59,8 @@ def get_base_opts():
             'Sec-Fetch-Mode': 'navigate'
         },
         'extractor_args': {
-            'youtube': ['player_client=android,web', 'player_skip=webpage']
+            'youtube': ['player_client=android,web', 'player_skip=webpage'],
+            'tiktok': ['api_hostname=api16-normal-c-useast1a.tiktokv.com', 'app_version=31.2.4']
         },
         'socket_timeout': 15,
     }
@@ -144,6 +145,13 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                     break
 
         if last_error:
+            err_msg = str(last_error).lower()
+            if 'private' in err_msg or 'deleted' in err_msg or 'unavailable' in err_msg or 'not found' in err_msg:
+                raise ValueError("private_video")
+            elif 'timeout' in err_msg or 'network' in err_msg or 'timed out' in err_msg:
+                raise ValueError("timeout")
+            elif 'sign in' in err_msg or 'login' in err_msg:
+                raise ValueError("login_required")
             raise last_error
         return []
 

@@ -366,6 +366,12 @@ async def process_dl(callback: CallbackQuery):
                     if cached_items:
                         await MEDIA_CACHE.set(cache_key, {'type': 'group', 'items': cached_items})
                     
+    except ValueError as ve:
+        err_key = str(ve)
+        if err_key in ["private_video", "timeout", "login_required"]:
+            await callback.message.reply(await get_text(callback.from_user.id, err_key))
+        else:
+            await callback.message.reply(await get_text(callback.from_user.id, "error"))
     except Exception as e:
         await callback.message.reply(await get_text(callback.from_user.id, "error"))
     finally:
