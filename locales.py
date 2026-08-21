@@ -22,6 +22,7 @@
         'login_required': "🔐 Bu videoni yuklab olish uchun akkauntga kirish talab qilinadi. Buni yuklab ololmayman.",
         'too_large': "❌ Hech qanday media topilmadi yoki fayl hajmi juda katta (>50MB).",
         'caption': "📥 @VidSaveUzBot orqali yuklab olindi",
+        'music_detected': "🎵 Aniqlangan musiqa: {track_info}",
         'lang_prompt': "🇺🇿 Tilingizni tanlang:\n🇷🇺 Выберите язык:\n🇬🇧 Choose your language:",
         'lang_set': "✅ Til o'rnatildi!"
     },
@@ -48,6 +49,7 @@
         'login_required': "🔐 Для скачивания этого видео требуется авторизация. Я не могу его скачать.",
         'too_large': "❌ Медиа не найдено или файл слишком большой (>50МБ).",
         'caption': "📥 Скачано через @VidSaveUzBot",
+        'music_detected': "🎵 Распознанная музыка: {track_info}",
         'lang_prompt': "🇺🇿 Tilingizni tanlang:\n🇷🇺 Выберите язык:\n🇬🇧 Choose your language:",
         'lang_set': "✅ Язык установлен!"
     },
@@ -74,6 +76,7 @@
         'login_required': "🔐 Login is required to download this video. I cannot download it.",
         'too_large': "❌ No media found or file is too large (>50MB).",
         'caption': "📥 Downloaded via @VidSaveUzBot",
+        'music_detected': "🎵 Detected Music: {track_info}",
         'lang_prompt': "🇺🇿 Tilingizni tanlang:\n🇷🇺 Выберите язык:\n🇬🇧 Choose your language:",
         'lang_set': "✅ Language set!"
     }

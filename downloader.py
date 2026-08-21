@@ -117,10 +117,12 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                                 filepath = entry.get('requested_downloads', [{}])[0].get('filepath', filepath)
                             
                             if os.path.exists(filepath):
+                                track_info = entry.get('artist') and entry.get('track') and f"{entry.get('artist')} - {entry.get('track')}" or entry.get('track') or entry.get('artist')
                                 results.append({
                                     'filepath': filepath,
                                     'title': entry.get('title', 'Media')[:100],
-                                    'ext': 'mp3' if is_audio else entry.get('ext', 'mp4')
+                                    'ext': 'mp3' if is_audio else entry.get('ext', 'mp4'),
+                                    'track_info': track_info
                                 })
                     else:
                         filepath = ydl.prepare_filename(info)
@@ -130,10 +132,12 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                             filepath = info.get('requested_downloads', [{}])[0].get('filepath', filepath)
                             
                         if os.path.exists(filepath):
+                            track_info = info.get('artist') and info.get('track') and f"{info.get('artist')} - {info.get('track')}" or info.get('track') or info.get('artist')
                             results.append({
                                 'filepath': filepath,
                                 'title': info.get('title', 'Media')[:100],
-                                'ext': 'mp3' if is_audio else info.get('ext', 'mp4')
+                                'ext': 'mp3' if is_audio else info.get('ext', 'mp4'),
+                                'track_info': track_info
                             })
                     return results
                 

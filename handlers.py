@@ -278,6 +278,11 @@ async def process_dl(callback: CallbackQuery):
     cached_data = await MEDIA_CACHE.get(cache_key)
     if cached_data:
         try:
+            track_info = cached_data.get('track_info')
+            if track_info:
+                music_detected_fmt = await get_text(callback.from_user.id, "music_detected")
+                caption_text = f"{caption_text}\n\n{music_detected_fmt.format(track_info=track_info)}"
+                
             if cached_data['type'] == 'photo':
                 await callback.message.reply_photo(photo=cached_data['id'], caption=caption_text)
             elif cached_data['type'] == 'video':
@@ -312,6 +317,12 @@ async def process_dl(callback: CallbackQuery):
             
             if len(results) == 1:
                 res = results[0]
+                
+                track_info = res.get('track_info')
+                if track_info:
+                    music_detected_fmt = await get_text(callback.from_user.id, "music_detected")
+                    caption_text = f"{caption_text}\n\n{music_detected_fmt.format(track_info=track_info)}"
+                    
                 filepath = res['filepath']
                 is_photo = res['ext'] in ['jpg', 'jpeg', 'png', 'webp']
                 file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
@@ -327,15 +338,15 @@ async def process_dl(callback: CallbackQuery):
                 if is_audio:
                     sent_msg = await callback.message.reply_audio(audio=media, caption=caption_text)
                     if sent_msg.audio:
-                        await MEDIA_CACHE.set(cache_key, {'type': 'audio', 'id': sent_msg.audio.file_id})
+                        await MEDIA_CACHE.set(cache_key, {'type': 'audio', 'id': sent_msg.audio.file_id, 'track_info': res.get('track_info')})
                 elif is_photo:
                     sent_msg = await callback.message.reply_photo(photo=media, caption=caption_text)
                     if sent_msg.photo:
-                        await MEDIA_CACHE.set(cache_key, {'type': 'photo', 'id': sent_msg.photo[-1].file_id})
+                        await MEDIA_CACHE.set(cache_key, {'type': 'photo', 'id': sent_msg.photo[-1].file_id, 'track_info': res.get('track_info')})
                 else:
                     sent_msg = await callback.message.reply_video(video=media, caption=caption_text)
                     if sent_msg.video:
-                        await MEDIA_CACHE.set(cache_key, {'type': 'video', 'id': sent_msg.video.file_id})
+                        await MEDIA_CACHE.set(cache_key, {'type': 'video', 'id': sent_msg.video.file_id, 'track_info': res.get('track_info')})
             else:
                 media_group = []
                 for i, res in enumerate(results[:10]):
@@ -350,10 +361,15 @@ async def process_dl(callback: CallbackQuery):
                     else:
                         media = FSInputFile(filepath)
                         
+                    item_caption = caption_text
+                    if i == 0 and res.get('track_info'):
+                        music_detected_fmt = await get_text(callback.from_user.id, "music_detected")
+                        item_caption = f"{caption_text}\n\n{music_detected_fmt.format(track_info=res.get('track_info'))}"
+                    
                     if res['ext'] in ['jpg', 'jpeg', 'png', 'webp']:
-                        media_group.append(InputMediaPhoto(media=media, caption=caption_text if i == 0 else None))
+                        media_group.append(InputMediaPhoto(media=media, caption=item_caption if i == 0 else None))
                     else:
-                        media_group.append(InputMediaVideo(media=media, caption=caption_text if i == 0 else None))
+                        media_group.append(InputMediaVideo(media=media, caption=item_caption if i == 0 else None))
                 
                 sent_msgs = await callback.message.answer_media_group(media=media_group, reply_to_message_id=callback.message.message_id)
                 if sent_msgs:
@@ -364,7 +380,7 @@ async def process_dl(callback: CallbackQuery):
                         elif msg.video:
                             cached_items.append({'type': 'video', 'id': msg.video.file_id})
                     if cached_items:
-                        await MEDIA_CACHE.set(cache_key, {'type': 'group', 'items': cached_items})
+                        await MEDIA_CACHE.set(cache_key, {'type': 'group', 'items': cached_items, 'track_info': results[0].get('track_info') if results else None})
                     
     except ValueError as ve:
         err_key = str(ve)
