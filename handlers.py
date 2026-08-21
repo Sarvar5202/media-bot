@@ -8,6 +8,9 @@ from aiogram.filters import CommandStart, Command
 from aiogram.utils.chat_action import ChatActionSender
 from aiogram.exceptions import TelegramForbiddenError
 from locales import TEXTS
+import tempfile
+import shutil
+from contextlib import asynccontextmanager
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from downloader import download_media
 from db import add_user, get_stats, get_user_info, set_user_inactive, get_all_active_users, get_all_users, get_user_language, set_user_language, increment_platform_stat, get_platform_stats
@@ -60,16 +63,26 @@ class SmartCache:
                 self.keys.pop(k, None)
 
 MEDIA_CACHE = SmartCache(ttl=3600, max_items=1000)
+URL_CACHE = SmartCache(ttl=3600, max_items=1000)
 
 async def cache_cleanup_task():
     while True:
         await asyncio.sleep(600)
         try:
             await MEDIA_CACHE.cleanup()
+            await URL_CACHE.cleanup()
         except Exception:
             pass
 
 
+
+@asynccontextmanager
+async def temporary_media_directory():
+    temp_dir = tempfile.mkdtemp(prefix="vidsave_")
+    try:
+        yield temp_dir
+    finally:
+        await asyncio.to_thread(shutil.rmtree, temp_dir, ignore_errors=True)
 
 def is_admin(user_id: int) -> bool:
     if config.admin_id and user_id == config.admin_id:
@@ -218,7 +231,29 @@ async def cmd_broadcast(message: Message):
 @router.message(F.text.regexp(URL_PATTERN).as_("url_match"))
 async def handle_media_url(message: Message, url_match: re.Match):
     url = url_match.group(1)
-    url_hash = hashlib.md5(url.encode()).hexdigest()
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
+    
+    await URL_CACHE.set(url_hash, url)
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📥 Videoni yuklab olish", callback_data=f"dl_vid|{url_hash}")],
+        [InlineKeyboardButton(text="🎵 MP3 (Ovozni kuchaytirish)", callback_data=f"dl_aud|{url_hash}")]
+    ])
+    
+    await message.reply("Qaysi formatda yuklab olamiz? / Выберите формат: / Choose format:", reply_markup=markup)
+
+@router.callback_query(F.data.startswith("dl_"))
+async def process_dl(callback: CallbackQuery):
+    action, url_hash = callback.data.split("|")
+    is_audio = (action == "dl_aud")
+    
+    url = await URL_CACHE.get(url_hash)
+    if not url:
+        await callback.message.edit_text("❌ Havola muddati tugagan. Iltimos, qaytadan yuboring.")
+        await callback.answer()
+        return
+        
+    await callback.message.edit_reply_markup(reply_markup=None)
     
     platform = 'Boshqa'
     url_lower = url.lower()
@@ -231,15 +266,18 @@ async def handle_media_url(message: Message, url_match: re.Match):
     
     await increment_platform_stat(platform)
     
-    caption_text = await get_text(message.from_user.id, 'caption')
+    caption_text = await get_text(callback.from_user.id, 'caption')
     
-    cached_data = await MEDIA_CACHE.get(url_hash)
+    cache_key = f"{url_hash}_{'aud' if is_audio else 'vid'}"
+    cached_data = await MEDIA_CACHE.get(cache_key)
     if cached_data:
         try:
             if cached_data['type'] == 'photo':
-                await message.reply_photo(photo=cached_data['id'], caption=caption_text)
+                await callback.message.reply_photo(photo=cached_data['id'], caption=caption_text)
             elif cached_data['type'] == 'video':
-                await message.reply_video(video=cached_data['id'], caption=caption_text)
+                await callback.message.reply_video(video=cached_data['id'], caption=caption_text)
+            elif cached_data['type'] == 'audio':
+                await callback.message.reply_audio(audio=cached_data['id'], caption=caption_text)
             elif cached_data['type'] == 'group':
                 media_group = []
                 for i, item in enumerate(cached_data['items']):
@@ -247,20 +285,23 @@ async def handle_media_url(message: Message, url_match: re.Match):
                         media_group.append(InputMediaPhoto(media=item['id'], caption=caption_text if i == 0 else None))
                     else:
                         media_group.append(InputMediaVideo(media=item['id'], caption=caption_text if i == 0 else None))
-                await message.answer_media_group(media=media_group, reply_to_message_id=message.message_id)
+                await callback.message.answer_media_group(media=media_group, reply_to_message_id=callback.message.message_id)
+            await callback.message.delete()
             return
         except Exception:
             pass
 
-    status_msg = await message.reply(await get_text(message.from_user.id, "wait"))
+    status_msg = await callback.message.reply(await get_text(callback.from_user.id, "wait"))
     results = []
     
     try:
-        async with ChatActionSender.upload_video(bot=message.bot, chat_id=message.chat.id):
-            results = await download_media(url)
+        temp_dir_ctx = temporary_media_directory()
+        temp_dir = await temp_dir_ctx.__aenter__()
+        async with ChatActionSender.upload_video(bot=callback.bot, chat_id=callback.message.chat.id):
+            results = await download_media(url, is_audio=is_audio, temp_dir=temp_dir)
             
             if not results:
-                await message.reply(await get_text(message.from_user.id, "too_large"))
+                await callback.message.reply(await get_text(callback.from_user.id, "too_large"))
                 return
             
             if len(results) == 1:
@@ -269,7 +310,6 @@ async def handle_media_url(message: Message, url_match: re.Match):
                 is_photo = res['ext'] in ['jpg', 'jpeg', 'png', 'webp']
                 file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
                 
-                # RAM Buffering for lightweight media (< 10MB)
                 if file_size > 0 and file_size < 10 * 1024 * 1024:
                     with open(filepath, 'rb') as f:
                         file_bytes = f.read()
@@ -278,14 +318,18 @@ async def handle_media_url(message: Message, url_match: re.Match):
                 else:
                     media = FSInputFile(filepath)
                 
-                if is_photo:
-                    sent_msg = await message.reply_photo(photo=media, caption=caption_text)
+                if is_audio:
+                    sent_msg = await callback.message.reply_audio(audio=media, caption=caption_text)
+                    if sent_msg.audio:
+                        await MEDIA_CACHE.set(cache_key, {'type': 'audio', 'id': sent_msg.audio.file_id})
+                elif is_photo:
+                    sent_msg = await callback.message.reply_photo(photo=media, caption=caption_text)
                     if sent_msg.photo:
-                        await MEDIA_CACHE.set(url_hash, {'type': 'photo', 'id': sent_msg.photo[-1].file_id})
+                        await MEDIA_CACHE.set(cache_key, {'type': 'photo', 'id': sent_msg.photo[-1].file_id})
                 else:
-                    sent_msg = await message.reply_video(video=media, caption=caption_text)
+                    sent_msg = await callback.message.reply_video(video=media, caption=caption_text)
                     if sent_msg.video:
-                        await MEDIA_CACHE.set(url_hash, {'type': 'video', 'id': sent_msg.video.file_id})
+                        await MEDIA_CACHE.set(cache_key, {'type': 'video', 'id': sent_msg.video.file_id})
             else:
                 media_group = []
                 for i, res in enumerate(results[:10]):
@@ -305,7 +349,7 @@ async def handle_media_url(message: Message, url_match: re.Match):
                     else:
                         media_group.append(InputMediaVideo(media=media, caption=caption_text if i == 0 else None))
                 
-                sent_msgs = await message.answer_media_group(media=media_group, reply_to_message_id=message.message_id)
+                sent_msgs = await callback.message.answer_media_group(media=media_group, reply_to_message_id=callback.message.message_id)
                 if sent_msgs:
                     cached_items = []
                     for msg in sent_msgs:
@@ -314,10 +358,10 @@ async def handle_media_url(message: Message, url_match: re.Match):
                         elif msg.video:
                             cached_items.append({'type': 'video', 'id': msg.video.file_id})
                     if cached_items:
-                        await MEDIA_CACHE.set(url_hash, {'type': 'group', 'items': cached_items})
+                        await MEDIA_CACHE.set(cache_key, {'type': 'group', 'items': cached_items})
                     
     except Exception as e:
-        await message.reply(await get_text(message.from_user.id, "error"))
+        await callback.message.reply(await get_text(callback.from_user.id, "error"))
     finally:
         for res in results:
             if res and 'filepath' in res and os.path.exists(res['filepath']):
@@ -326,6 +370,14 @@ async def handle_media_url(message: Message, url_match: re.Match):
                 except Exception:
                     pass
         try:
+            await temp_dir_ctx.__aexit__(None, None, None)
+        except Exception:
+            pass
+        try:
             await status_msg.delete()
+        except Exception:
+            pass
+        try:
+            await callback.message.delete()
         except Exception:
             pass

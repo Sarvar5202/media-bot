@@ -64,18 +64,31 @@ def get_base_opts():
         opts['cookiefile'] = COOKIE_FILE
     return opts
 
-async def download_media(url: str) -> list[dict]:
+async def download_media(url: str, is_audio: bool = False, temp_dir: str = "downloads") -> list[dict]:
     def _download():
         dl_uuid = str(uuid.uuid4())[:8]
-        if not os.path.exists("downloads"):
-            os.makedirs("downloads")
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir, exist_ok=True)
             
         retries = 3
         last_error = None
         
         for attempt in range(retries):
             opts = get_base_opts()
-            opts['outtmpl'] = f'downloads/{dl_uuid}_%(extractor)s_%(id)s_%(playlist_index|)s.%(ext)s'
+            
+            if is_audio:
+                opts['format'] = 'bestaudio/best'
+                opts['postprocessors'] = [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }]
+                opts['postprocessor_args'] = {
+                    'ffmpeg': ['-af', 'volume=2.5,dynaudnorm', '-threads', '0']
+                }
+                opts['outtmpl'] = os.path.join(temp_dir, f'{dl_uuid}_%(extractor)s_%(id)s_%(playlist_index|)s.%(ext)s')
+            else:
+                opts['outtmpl'] = os.path.join(temp_dir, f'{dl_uuid}_%(extractor)s_%(id)s_%(playlist_index|)s.%(ext)s')
             
             if attempt > 0:
                 opts['http_headers']['User-Agent'] = random.choice(USER_AGENTS)
@@ -94,21 +107,29 @@ async def download_media(url: str) -> list[dict]:
                             if not entry:
                                 continue
                             filepath = ydl.prepare_filename(entry)
-                            filepath = entry.get('requested_downloads', [{}])[0].get('filepath', filepath)
+                            if is_audio:
+                                filepath = os.path.splitext(filepath)[0] + '.mp3'
+                            else:
+                                filepath = entry.get('requested_downloads', [{}])[0].get('filepath', filepath)
+                            
                             if os.path.exists(filepath):
                                 results.append({
                                     'filepath': filepath,
                                     'title': entry.get('title', 'Media')[:100],
-                                    'ext': entry.get('ext', 'mp4')
+                                    'ext': 'mp3' if is_audio else entry.get('ext', 'mp4')
                                 })
                     else:
                         filepath = ydl.prepare_filename(info)
-                        filepath = info.get('requested_downloads', [{}])[0].get('filepath', filepath)
+                        if is_audio:
+                            filepath = os.path.splitext(filepath)[0] + '.mp3'
+                        else:
+                            filepath = info.get('requested_downloads', [{}])[0].get('filepath', filepath)
+                            
                         if os.path.exists(filepath):
                             results.append({
                                 'filepath': filepath,
                                 'title': info.get('title', 'Media')[:100],
-                                'ext': info.get('ext', 'mp4')
+                                'ext': 'mp3' if is_audio else info.get('ext', 'mp4')
                             })
                     return results
                 
@@ -123,5 +144,4 @@ async def download_media(url: str) -> list[dict]:
             raise last_error
         return []
 
-    # Process extraction in a non-blocking asynchronous thread so the bot loop doesn't freeze
     return await asyncio.to_thread(_download)
