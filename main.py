@@ -56,7 +56,17 @@ async def main():
         stream=sys.stdout
     )
     
-    bot = Bot(token=config.bot_token)
+    from aiogram.client.session.aiohttp import AiohttpSession
+    from aiogram.client.telegram import TelegramAPIServer
+    
+    session = None
+    if config.local_api_server_url:
+        session = AiohttpSession(
+            api=TelegramAPIServer.from_base(config.local_api_server_url, is_local=True)
+        )
+        logging.info(f"Using Local Telegram Bot API Server: {config.local_api_server_url}")
+        
+    bot = Bot(token=config.bot_token, session=session)
     dp = Dispatcher()
     
     from middlewares import UserTrackingMiddleware

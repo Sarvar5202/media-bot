@@ -32,9 +32,12 @@ def setup_cookies():
 
 COOKIE_FILE = setup_cookies()
 
+from config import config
+
 def get_base_opts():
+    max_size = '2000M' if config.local_api_server_url else '50M'
     opts = {
-        'format': 'bestvideo[ext=mp4][filesize<=50M]+bestaudio[ext=m4a]/best[ext=mp4][filesize<=50M]/best[filesize<=50M]/best',
+        'format': f'bestvideo[ext=mp4][filesize<={max_size}]+bestaudio[ext=m4a]/best[ext=mp4][filesize<={max_size}]/best[filesize<={max_size}]/best',
         'format_sort': ['res:1080', 'ext:mp4:m4a'], # Prevent container mismatches and prioritize compatibility
         'merge_output_format': 'mp4',
         'concurrent_fragment_downloads': 10,
