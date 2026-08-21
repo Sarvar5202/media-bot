@@ -79,3 +79,13 @@ async def get_all_active_users() -> list:
     except Exception as e:
         logging.error(f"Error getting active users: {e}")
         return []
+
+async def get_all_users(limit: int = 50) -> list:
+    if not pool: return []
+    try:
+        async with pool.acquire() as conn:
+            records = await conn.fetch("SELECT user_id, username FROM users ORDER BY created_at DESC LIMIT $1", limit)
+            return [(r['user_id'], r['username']) for r in records]
+    except Exception as e:
+        logging.error(f"Error getting all users: {e}")
+        return []

@@ -24,6 +24,29 @@ async def start_web_server():
     await site.start()
     logging.info(f"Web server started on port {port}")
 
+from aiogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
+
+async def setup_bot_commands(bot: Bot):
+    public_commands = [
+        BotCommand(command="start", description="Botni ishga tushirish"),
+        BotCommand(command="help", description="Yordam va ma'lumot"),
+    ]
+    await bot.set_my_commands(public_commands, scope=BotCommandScopeDefault())
+    
+    if config.admin_id:
+        admin_commands = [
+            BotCommand(command="start", description="Botni ishga tushirish"),
+            BotCommand(command="help", description="Yordam va ma'lumot"),
+            BotCommand(command="stats", description="Bot statistikasi"),
+            BotCommand(command="users", description="Foydalanuvchilar ro'yxati"),
+            BotCommand(command="broadcast", description="Xabar tarqatish (/broadcast <xabar>)"),
+            BotCommand(command="user_info", description="Foydalanuvchi ma'lumoti (/user_info <id>)"),
+        ]
+        try:
+            await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=config.admin_id))
+        except Exception as e:
+            logging.error(f"Failed to set admin commands: {e}")
+
 async def main():
     await init_db()
     logging.basicConfig(
@@ -35,6 +58,8 @@ async def main():
     bot = Bot(token=config.bot_token)
     dp = Dispatcher()
     dp.include_router(router)
+    
+    await setup_bot_commands(bot)
     
     # Start the web server concurrently
     await start_web_server()

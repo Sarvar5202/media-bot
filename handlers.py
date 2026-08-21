@@ -8,7 +8,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.utils.chat_action import ChatActionSender
 from aiogram.exceptions import TelegramForbiddenError
 from downloader import download_media
-from db import add_user, get_stats, get_user_info, set_user_inactive, get_all_active_users
+from db import add_user, get_stats, get_user_info, set_user_inactive, get_all_active_users, get_all_users
 from config import config
 import io
 import time
@@ -86,6 +86,20 @@ async def cmd_stats(message: Message):
         f"✅ Faol foydalanuvchilar: {stats['active']}\n"
         f"📈 Oxirgi 24 soatda: +{stats['new_24h']}"
     )
+    await message.reply(text, parse_mode="HTML")
+
+@router.message(Command("users"))
+async def cmd_users(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    users_list = await get_all_users(50)
+    
+    text = f"📊 <b>Oxirgi 50 ta foydalanuvchi</b>:\n\n"
+    for uid, uname in users_list:
+        uname_text = f"@{uname}" if uname else "Mavjud emas"
+        text += f"🆔 <code>{uid}</code> | 👤 {uname_text}\n"
+    
     await message.reply(text, parse_mode="HTML")
 
 @router.message(Command("user_info"))
