@@ -34,7 +34,9 @@ COOKIE_FILE = setup_cookies()
 
 def get_base_opts():
     opts = {
-        'format': 'best[ext=mp4][filesize<=50M]/bestvideo[ext=mp4][filesize<=50M]+bestaudio[ext=m4a]/best[filesize<=50M]/best',
+        'format': 'bestvideo[ext=mp4][filesize<=50M]+bestaudio[ext=m4a]/best[ext=mp4][filesize<=50M]/best[filesize<=50M]/best',
+        'merge_output_format': 'mp4',
+        'concurrent_fragment_downloads': 5, # Multi-threaded fragment downloads
         'noplaylist': False,
         'quiet': True,
         'no_warnings': True,
@@ -42,7 +44,6 @@ def get_base_opts():
         'writesubtitles': False,
         'writeautomaticsub': False,
         'writethumbnail': False,
-        'nocheckcertificate': True,
         'http_headers': {
             'User-Agent': random.choice(USER_AGENTS),
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -52,10 +53,7 @@ def get_base_opts():
         'extractor_args': {
             'youtube': ['player_client=android,web', 'player_skip=webpage']
         },
-        'sleep_interval_requests': 1,
-        'sleep_interval': 1,
-        'max_sleep_interval': 3,
-        'socket_timeout': 30, # Optimization for faster fallback
+        'socket_timeout': 15, # Optimized for faster fallback
     }
     if COOKIE_FILE:
         opts['cookiefile'] = COOKIE_FILE
