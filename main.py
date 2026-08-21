@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher
 from aiohttp import web
 from config import config
 from handlers import router
+from db import init_db
 
 async def health_check(request):
     return web.json_response({"status": "healthy"})
@@ -24,6 +25,7 @@ async def start_web_server():
     logging.info(f"Web server started on port {port}")
 
 async def main():
+    init_db()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",

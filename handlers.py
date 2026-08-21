@@ -5,6 +5,7 @@ from aiogram.types import Message, FSInputFile, InputMediaVideo, InputMediaPhoto
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.chat_action import ChatActionSender
 from downloader import download_media
+from db import add_user, get_users_count
 
 router = Router()
 
@@ -13,14 +14,25 @@ URL_PATTERN = re.compile(
 )
 
 MEDIA_CACHE = {}
+CAPTION_TEXT = "📥 @VidSaveUzBot orqali yuklab olindi"
+ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "").split(",") if id]
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
-    await message.reply("👋 Welcome to the Universal Media Downloader!\n\nJust send me a link from Instagram, TikTok, YouTube, X/Twitter, Pinterest, or Facebook.")
+    add_user(message.from_user.id)
+    await message.reply("👋 Assalomu alaykum! Menga Instagram, TikTok, YouTube, X/Twitter, Pinterest yoki Facebook havolasini yuboring, uni darhol yuklab beraman. 🚀")
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    await message.reply("Just paste a link! I will download it for you. (Max 50MB)")
+    await message.reply("Shunchaki havolani yuboring! Men uni siz uchun yuklab beraman. (Maksimal hajmi 50MB)")
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message):
+    if not ADMIN_IDS or message.from_user.id in ADMIN_IDS:
+        count = get_users_count()
+        await message.reply(f"📊 Bot statistikasi:\nJami foydalanuvchilar: {count} ta")
+    else:
+        await message.reply("❌ Sizda bu buyruqdan foydalanish huquqi yo'q.")
 
 @router.message(F.text.regexp(URL_PATTERN).as_("url_match"))
 async def handle_media_url(message: Message, url_match: re.Match):
@@ -30,21 +42,21 @@ async def handle_media_url(message: Message, url_match: re.Match):
         cached_id = MEDIA_CACHE[url]
         try:
             try:
-                await message.reply_video(video=cached_id)
+                await message.reply_video(video=cached_id, caption=CAPTION_TEXT)
             except Exception:
-                await message.reply_document(document=cached_id)
+                await message.reply_document(document=cached_id, caption=CAPTION_TEXT)
             return
         except Exception:
             pass
 
-    status_msg = await message.reply("⏳ Downloading media...")
+    status_msg = await message.reply("⏳")
     
     try:
         async with ChatActionSender.upload_video(bot=message.bot, chat_id=message.chat.id):
             results = await download_media(url)
             
             if not results:
-                await message.reply("❌ No media found or file too large (>50MB).")
+                await message.reply("❌ Hech qanday media topilmadi yoki fayl hajmi juda katta (>50MB).")
                 return
             
             if len(results) == 1:
@@ -54,21 +66,21 @@ async def handle_media_url(message: Message, url_match: re.Match):
                 is_photo = res['ext'] in ['jpg', 'jpeg', 'png', 'webp']
                 
                 if is_photo:
-                    sent_msg = await message.reply_photo(photo=media, caption=res['title'])
+                    sent_msg = await message.reply_photo(photo=media, caption=CAPTION_TEXT)
                     if sent_msg.photo:
                         MEDIA_CACHE[url] = sent_msg.photo[-1].file_id
                 else:
-                    sent_msg = await message.reply_video(video=media, caption=res['title'])
+                    sent_msg = await message.reply_video(video=media, caption=CAPTION_TEXT)
                     if sent_msg.video:
                         MEDIA_CACHE[url] = sent_msg.video.file_id
             else:
                 media_group = []
-                for res in results[:10]:
+                for i, res in enumerate(results[:10]):
                     media = FSInputFile(res['filepath'])
                     if res['ext'] in ['jpg', 'jpeg', 'png', 'webp']:
-                        media_group.append(InputMediaPhoto(media=media))
+                        media_group.append(InputMediaPhoto(media=media, caption=CAPTION_TEXT if i == 0 else None))
                     else:
-                        media_group.append(InputMediaVideo(media=media))
+                        media_group.append(InputMediaVideo(media=media, caption=CAPTION_TEXT if i == 0 else None))
                 
                 await message.answer_media_group(media=media_group, reply_to_message_id=message.message_id)
 
@@ -77,7 +89,7 @@ async def handle_media_url(message: Message, url_match: re.Match):
                     os.remove(res['filepath'])
                     
     except Exception as e:
-        await message.reply(f"❌ Failed to download media.\nError: {str(e)[:100]}")
+        await message.reply(f"❌ Mediani yuklab olishda xatolik yuz berdi.\nXato: {str(e)[:100]}")
     finally:
         try:
             await status_msg.delete()
