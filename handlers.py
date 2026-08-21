@@ -12,7 +12,8 @@ import tempfile
 import shutil
 from contextlib import asynccontextmanager
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from downloader import download_media
+from downloader import download_media, get_media_info
+import asyncio
 from db import add_user, get_stats, get_user_info, set_user_inactive, get_all_active_users, get_all_users, get_user_language, set_user_language, increment_platform_stat, get_platform_stats
 from config import config
 import io
@@ -238,29 +239,31 @@ async def cmd_broadcast(message: Message):
 async def handle_media_url(message: Message, url_match: re.Match):
     url = url_match.group(1)
     url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
-    
     await URL_CACHE.set(url_hash, url)
     
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📥 Videoni yuklab olish", callback_data=f"dl_vid|{url_hash}")],
-        [InlineKeyboardButton(text="🎵 MP3 (Ovozni kuchaytirish)", callback_data=f"dl_aud|{url_hash}")]
-    ])
+    wait_msg = await message.reply(await get_text(message.from_user.id, "wait"))
     
-    await message.reply("Qaysi formatda yuklab olamiz? / Выберите формат: / Choose format:", reply_markup=markup)
+    info = await get_media_info(url)
+    duration = info.get('duration', None)
+    
+    if duration is not None and duration <= 300:
+        # Fast-track path: download both video and audio concurrently
+        # Since running both might be heavy, we can do them sequentially or concurrently.
+        # Let's do sequentially to avoid hitting limits or TempDir clashes too fast, actually yt-dlp isolates downloads safely.
+        await wait_msg.delete()
+        task1 = execute_download_and_send(url, url_hash, False, message.from_user.id, message.bot, message.chat.id, message.message_id)
+        task2 = execute_download_and_send(url, url_hash, True, message.from_user.id, message.bot, message.chat.id, message.message_id)
+        await asyncio.gather(task1, task2)
+    else:
+        # Interactive path
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📥 Videoni yuklab olish", callback_data=f"dl_vid|{url_hash}")],
+            [InlineKeyboardButton(text="🎵 MP3 (Ovozni kuchaytirish)", callback_data=f"dl_aud|{url_hash}")]
+        ])
+        await wait_msg.delete()
+        await message.reply("Qaysi formatda yuklab olamiz? / Выберите формат: / Choose format:", reply_markup=markup)
 
-@router.callback_query(F.data.startswith("dl_"))
-async def process_dl(callback: CallbackQuery):
-    action, url_hash = callback.data.split("|")
-    is_audio = (action == "dl_aud")
-    
-    url = await URL_CACHE.get(url_hash)
-    if not url:
-        await callback.message.edit_text("❌ Havola muddati tugagan. Iltimos, qaytadan yuboring.")
-        await callback.answer()
-        return
-        
-    await callback.message.edit_reply_markup(reply_markup=None)
-    
+async def execute_download_and_send(url: str, url_hash: str, is_audio: bool, user_id: int, bot, chat_id: int, reply_to_message_id: int, status_msg_to_delete=None):
     platform = 'Boshqa'
     url_lower = url.lower()
     if 'instagram.com' in url_lower: platform = 'Instagram'
@@ -272,7 +275,7 @@ async def process_dl(callback: CallbackQuery):
     
     await increment_platform_stat(platform)
     
-    caption_text = await get_text(callback.from_user.id, 'caption')
+    caption_text = await get_text(user_id, 'caption')
     
     cache_key = f"{url_hash}_{'aud' if is_audio else 'vid'}"
     cached_data = await MEDIA_CACHE.get(cache_key)
@@ -280,15 +283,15 @@ async def process_dl(callback: CallbackQuery):
         try:
             track_info = cached_data.get('track_info')
             if track_info:
-                music_detected_fmt = await get_text(callback.from_user.id, "music_detected")
+                music_detected_fmt = await get_text(user_id, "music_detected")
                 caption_text = f"{caption_text}\n\n{music_detected_fmt.format(track_info=track_info)}"
                 
             if cached_data['type'] == 'photo':
-                await callback.message.reply_photo(photo=cached_data['id'], caption=caption_text)
+                await bot.send_photo(chat_id=chat_id, photo=cached_data['id'], caption=caption_text, reply_to_message_id=reply_to_message_id)
             elif cached_data['type'] == 'video':
-                await callback.message.reply_video(video=cached_data['id'], caption=caption_text)
+                await bot.send_video(chat_id=chat_id, video=cached_data['id'], caption=caption_text, reply_to_message_id=reply_to_message_id)
             elif cached_data['type'] == 'audio':
-                await callback.message.reply_audio(audio=cached_data['id'], caption=caption_text)
+                await bot.send_audio(chat_id=chat_id, audio=cached_data['id'], caption=caption_text, reply_to_message_id=reply_to_message_id)
             elif cached_data['type'] == 'group':
                 media_group = []
                 for i, item in enumerate(cached_data['items']):
@@ -296,31 +299,37 @@ async def process_dl(callback: CallbackQuery):
                         media_group.append(InputMediaPhoto(media=item['id'], caption=caption_text if i == 0 else None))
                     else:
                         media_group.append(InputMediaVideo(media=item['id'], caption=caption_text if i == 0 else None))
-                await callback.message.answer_media_group(media=media_group, reply_to_message_id=callback.message.message_id)
-            await callback.message.delete()
-            return
+                await bot.send_media_group(chat_id=chat_id, media=media_group, reply_to_message_id=reply_to_message_id)
+            if status_msg_to_delete:
+                try: await status_msg_to_delete.delete()
+                except Exception: pass
+            return True
         except Exception:
             pass
 
-    status_msg = await callback.message.reply(await get_text(callback.from_user.id, "wait"))
+    status_msg = await bot.send_message(chat_id=chat_id, text=await get_text(user_id, "wait"), reply_to_message_id=reply_to_message_id)
+    if status_msg_to_delete:
+        try: await status_msg_to_delete.delete()
+        except Exception: pass
+
     results = []
     
     try:
         temp_dir_ctx = temporary_media_directory()
         temp_dir = await temp_dir_ctx.__aenter__()
-        async with ChatActionSender.upload_video(bot=callback.bot, chat_id=callback.message.chat.id):
+        async with ChatActionSender.upload_video(bot=bot, chat_id=chat_id):
             results = await download_media(url, is_audio=is_audio, temp_dir=temp_dir)
             
             if not results:
-                await callback.message.reply(await get_text(callback.from_user.id, "too_large"))
-                return
+                await bot.send_message(chat_id=chat_id, text=await get_text(user_id, "too_large"), reply_to_message_id=reply_to_message_id)
+                return False
             
             if len(results) == 1:
                 res = results[0]
                 
                 track_info = res.get('track_info')
                 if track_info:
-                    music_detected_fmt = await get_text(callback.from_user.id, "music_detected")
+                    music_detected_fmt = await get_text(user_id, "music_detected")
                     caption_text = f"{caption_text}\n\n{music_detected_fmt.format(track_info=track_info)}"
                     
                 filepath = res['filepath']
@@ -336,15 +345,15 @@ async def process_dl(callback: CallbackQuery):
                     media = FSInputFile(filepath)
                 
                 if is_audio:
-                    sent_msg = await callback.message.reply_audio(audio=media, caption=caption_text)
+                    sent_msg = await bot.send_audio(chat_id=chat_id, audio=media, caption=caption_text, reply_to_message_id=reply_to_message_id)
                     if sent_msg.audio:
                         await MEDIA_CACHE.set(cache_key, {'type': 'audio', 'id': sent_msg.audio.file_id, 'track_info': res.get('track_info')})
                 elif is_photo:
-                    sent_msg = await callback.message.reply_photo(photo=media, caption=caption_text)
+                    sent_msg = await bot.send_photo(chat_id=chat_id, photo=media, caption=caption_text, reply_to_message_id=reply_to_message_id)
                     if sent_msg.photo:
                         await MEDIA_CACHE.set(cache_key, {'type': 'photo', 'id': sent_msg.photo[-1].file_id, 'track_info': res.get('track_info')})
                 else:
-                    sent_msg = await callback.message.reply_video(video=media, caption=caption_text)
+                    sent_msg = await bot.send_video(chat_id=chat_id, video=media, caption=caption_text, reply_to_message_id=reply_to_message_id)
                     if sent_msg.video:
                         await MEDIA_CACHE.set(cache_key, {'type': 'video', 'id': sent_msg.video.file_id, 'track_info': res.get('track_info')})
             else:
@@ -352,6 +361,11 @@ async def process_dl(callback: CallbackQuery):
                 for i, res in enumerate(results[:10]):
                     filepath = res['filepath']
                     file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                    
+                    item_caption = caption_text
+                    if i == 0 and res.get('track_info'):
+                        music_detected_fmt = await get_text(user_id, "music_detected")
+                        item_caption = f"{caption_text}\n\n{music_detected_fmt.format(track_info=res.get('track_info'))}"
                     
                     if file_size > 0 and file_size < 10 * 1024 * 1024:
                         with open(filepath, 'rb') as f:
@@ -361,17 +375,12 @@ async def process_dl(callback: CallbackQuery):
                     else:
                         media = FSInputFile(filepath)
                         
-                    item_caption = caption_text
-                    if i == 0 and res.get('track_info'):
-                        music_detected_fmt = await get_text(callback.from_user.id, "music_detected")
-                        item_caption = f"{caption_text}\n\n{music_detected_fmt.format(track_info=res.get('track_info'))}"
-                    
                     if res['ext'] in ['jpg', 'jpeg', 'png', 'webp']:
                         media_group.append(InputMediaPhoto(media=media, caption=item_caption if i == 0 else None))
                     else:
                         media_group.append(InputMediaVideo(media=media, caption=item_caption if i == 0 else None))
                 
-                sent_msgs = await callback.message.answer_media_group(media=media_group, reply_to_message_id=callback.message.message_id)
+                sent_msgs = await bot.send_media_group(chat_id=chat_id, media=media_group, reply_to_message_id=reply_to_message_id)
                 if sent_msgs:
                     cached_items = []
                     for msg in sent_msgs:
@@ -381,15 +390,17 @@ async def process_dl(callback: CallbackQuery):
                             cached_items.append({'type': 'video', 'id': msg.video.file_id})
                     if cached_items:
                         await MEDIA_CACHE.set(cache_key, {'type': 'group', 'items': cached_items, 'track_info': results[0].get('track_info') if results else None})
-                    
+        return True
     except ValueError as ve:
         err_key = str(ve)
         if err_key in ["private_video", "timeout", "login_required"]:
-            await callback.message.reply(await get_text(callback.from_user.id, err_key))
+            await bot.send_message(chat_id=chat_id, text=await get_text(user_id, err_key), reply_to_message_id=reply_to_message_id)
         else:
-            await callback.message.reply(await get_text(callback.from_user.id, "error"))
+            await bot.send_message(chat_id=chat_id, text=await get_text(user_id, "error"), reply_to_message_id=reply_to_message_id)
+        return False
     except Exception as e:
-        await callback.message.reply(await get_text(callback.from_user.id, "error"))
+        await bot.send_message(chat_id=chat_id, text=await get_text(user_id, "error"), reply_to_message_id=reply_to_message_id)
+        return False
     finally:
         for res in results:
             if res and 'filepath' in res and os.path.exists(res['filepath']):
@@ -405,7 +416,20 @@ async def process_dl(callback: CallbackQuery):
             await status_msg.delete()
         except Exception:
             pass
-        try:
-            await callback.message.delete()
-        except Exception:
-            pass
+
+@router.callback_query(F.data.startswith("dl_"))
+async def process_dl(callback: CallbackQuery):
+    action, url_hash = callback.data.split("|")
+    is_audio = (action == "dl_aud")
+    
+    url = await URL_CACHE.get(url_hash)
+    if not url:
+        await callback.message.edit_text("❌ Havola muddati tugagan. Iltimos, qaytadan yuboring.")
+        await callback.answer()
+        return
+        
+    await callback.message.edit_reply_markup(reply_markup=None)
+    
+    await execute_download_and_send(url, url_hash, is_audio, callback.from_user.id, callback.bot, callback.message.chat.id, callback.message.message_id, status_msg_to_delete=callback.message)
+    await callback.answer()
+
