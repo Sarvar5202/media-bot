@@ -39,7 +39,7 @@ async def main():
     # Start the web server concurrently
     await start_web_server()
     
-    logging.info("Bot is starting polling...")
+    logging.info("Bot is starting polling... (Clean Rebuild V2)")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
