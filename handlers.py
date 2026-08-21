@@ -111,7 +111,6 @@ async def process_lang(callback: CallbackQuery):
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
-    await add_user(message.from_user.id, message.from_user.username)
     text = await get_text(message.from_user.id, 'start')
     await message.reply(text)
 
@@ -151,14 +150,21 @@ async def cmd_users(message: Message):
     if not is_admin(message.from_user.id):
         return
     
-    users_list = await get_all_users(50)
+    users_list = await get_all_users()
+    count = len(users_list)
     
-    text = f"📊 <b>Oxirgi 50 ta foydalanuvchi</b>:\n\n"
-    for uid, uname in users_list:
-        uname_text = f"@{uname}" if uname else "Mavjud emas"
-        text += f"🆔 <code>{uid}</code> | 👤 {uname_text}\n"
+    text = f"📊 Jami foydalanuvchilar: {count} ta\n\nRo'yxat:\n"
+    for u in users_list:
+        uname_text = f"@{u['username']}" if u['username'] else "Mavjud emas"
+        fname_text = u['full_name'] or "Mavjud emas"
+        date_str = u['created_at'].strftime('%Y-%m-%d %H:%M') if u['created_at'] else "Noma'lum"
+        text += f"🆔 {u['user_id']} | 👤 {uname_text} | 📝 {fname_text} | 🕒 {date_str}\n"
     
-    await message.reply(text, parse_mode="HTML")
+    if len(text) > 4000:
+        file = BufferedInputFile(text.encode('utf-8'), filename=f"users_list_{count}.txt")
+        await message.reply_document(document=file, caption=f"📊 Jami foydalanuvchilar: {count} ta")
+    else:
+        await message.reply(text)
 
 @router.message(Command("user_info"))
 async def cmd_user_info(message: Message):

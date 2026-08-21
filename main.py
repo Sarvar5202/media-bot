@@ -58,6 +58,11 @@ async def main():
     
     bot = Bot(token=config.bot_token)
     dp = Dispatcher()
+    
+    from middlewares import UserTrackingMiddleware
+    dp.message.middleware(UserTrackingMiddleware())
+    dp.callback_query.middleware(UserTrackingMiddleware())
+    
     dp.include_router(router)
     
     await setup_bot_commands(bot)
