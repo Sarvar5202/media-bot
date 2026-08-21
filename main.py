@@ -5,7 +5,7 @@ import os
 from aiogram import Bot, Dispatcher
 from aiohttp import web
 from config import config
-from handlers import router
+from handlers import router, cache_cleanup_task
 from db import init_db
 
 async def health_check(request):
@@ -39,7 +39,10 @@ async def main():
     # Start the web server concurrently
     await start_web_server()
     
-    logging.info("Bot is starting polling... (Clean Rebuild V2)")
+    # Start cache cleanup task
+    asyncio.create_task(cache_cleanup_task())
+    
+    logging.info("Bot is starting polling... (Clean Rebuild V3)")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

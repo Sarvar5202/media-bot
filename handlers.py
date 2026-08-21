@@ -15,7 +15,48 @@ URL_PATTERN = re.compile(
     r'(https?://(?:www\.)?(?:instagram\.com|tiktok\.com|youtube\.com|youtu\.be|x\.com|twitter\.com|facebook\.com|pin\.it|pinterest\.com)[^\s]+)'
 )
 
-MEDIA_CACHE = Cache(Cache.MEMORY, ttl=3600)
+import io
+import time
+import asyncio
+
+class SmartCache:
+    def __init__(self, ttl=3600, max_items=1000):
+        self.cache = Cache(Cache.MEMORY, ttl=ttl)
+        self.ttl = ttl
+        self.max_items = max_items
+        self.keys = {}
+        
+    async def get(self, key):
+        return await self.cache.get(key)
+        
+    async def set(self, key, value):
+        await self.cache.set(key, value)
+        self.keys[key] = time.time()
+        
+    async def cleanup(self):
+        now = time.time()
+        expired = [k for k, t in self.keys.items() if now - t > self.ttl]
+        for k in expired:
+            await self.cache.delete(k)
+            self.keys.pop(k, None)
+            
+        if len(self.keys) > self.max_items:
+            sorted_keys = sorted(self.keys.items(), key=lambda x: x[1])
+            to_remove = len(self.keys) - self.max_items
+            for k, _ in sorted_keys[:to_remove]:
+                await self.cache.delete(k)
+                self.keys.pop(k, None)
+
+MEDIA_CACHE = SmartCache(ttl=3600, max_items=1000)
+
+async def cache_cleanup_task():
+    while True:
+        await asyncio.sleep(600)
+        try:
+            await MEDIA_CACHE.cleanup()
+        except Exception:
+            pass
+
 CAPTION_TEXT = "📥 @VidSaveUzBot orqali yuklab olindi"
 ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "").split(",") if id]
 SUPER_ADMIN_ID = 7890020641
@@ -52,6 +93,8 @@ async def cmd_users(message: Message):
     
     await message.reply(text)
 
+from aiogram.types import BufferedInputFile
+
 @router.message(F.text.regexp(URL_PATTERN).as_("url_match"))
 async def handle_media_url(message: Message, url_match: re.Match):
     url = url_match.group(1)
@@ -77,6 +120,7 @@ async def handle_media_url(message: Message, url_match: re.Match):
             pass
 
     status_msg = await message.reply("⏳")
+    results = []
     
     try:
         async with ChatActionSender.upload_video(bot=message.bot, chat_id=message.chat.id):
@@ -88,9 +132,18 @@ async def handle_media_url(message: Message, url_match: re.Match):
             
             if len(results) == 1:
                 res = results[0]
-                media = FSInputFile(res['filepath'])
-                
+                filepath = res['filepath']
                 is_photo = res['ext'] in ['jpg', 'jpeg', 'png', 'webp']
+                file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                
+                # RAM Buffering for lightweight media (< 10MB)
+                if file_size > 0 and file_size < 10 * 1024 * 1024:
+                    with open(filepath, 'rb') as f:
+                        file_bytes = f.read()
+                    media = BufferedInputFile(file_bytes, filename=os.path.basename(filepath))
+                    os.remove(filepath)
+                else:
+                    media = FSInputFile(filepath)
                 
                 if is_photo:
                     sent_msg = await message.reply_photo(photo=media, caption=CAPTION_TEXT)
@@ -103,7 +156,17 @@ async def handle_media_url(message: Message, url_match: re.Match):
             else:
                 media_group = []
                 for i, res in enumerate(results[:10]):
-                    media = FSInputFile(res['filepath'])
+                    filepath = res['filepath']
+                    file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                    
+                    if file_size > 0 and file_size < 10 * 1024 * 1024:
+                        with open(filepath, 'rb') as f:
+                            file_bytes = f.read()
+                        media = BufferedInputFile(file_bytes, filename=os.path.basename(filepath))
+                        os.remove(filepath)
+                    else:
+                        media = FSInputFile(filepath)
+                        
                     if res['ext'] in ['jpg', 'jpeg', 'png', 'webp']:
                         media_group.append(InputMediaPhoto(media=media, caption=CAPTION_TEXT if i == 0 else None))
                     else:
@@ -119,14 +182,16 @@ async def handle_media_url(message: Message, url_match: re.Match):
                             cached_items.append({'type': 'video', 'id': msg.video.file_id})
                     if cached_items:
                         await MEDIA_CACHE.set(url_hash, {'type': 'group', 'items': cached_items})
-
-            for res in results:
-                if os.path.exists(res['filepath']):
-                    os.remove(res['filepath'])
                     
     except Exception as e:
         await message.reply("❌ Kechirasiz, media topilmadi yoki bu post yopiq/xususiy.")
     finally:
+        for res in results:
+            if res and 'filepath' in res and os.path.exists(res['filepath']):
+                try:
+                    os.remove(res['filepath'])
+                except Exception:
+                    pass
         try:
             await status_msg.delete()
         except Exception:
