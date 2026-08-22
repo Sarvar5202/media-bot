@@ -34,14 +34,20 @@ COOKIE_FILE = setup_cookies()
 
 from config import config
 
+import shutil
+
 def get_base_opts():
     max_size = '2000M' if config.local_api_server_url else '50M'
+    has_ffmpeg = shutil.which('ffmpeg') is not None
+    
+    fmt = f'bestvideo[ext=mp4][filesize<={max_size}]+bestaudio[ext=m4a]/best[ext=mp4][filesize<={max_size}]/best[filesize<={max_size}]/best' if has_ffmpeg else f'b[ext=mp4][filesize<={max_size}]/best[filesize<={max_size}]/best'
+    
     opts = {
-        'format': f'bestvideo[ext=mp4][filesize<={max_size}]+bestaudio[ext=m4a]/best[ext=mp4][filesize<={max_size}]/best[filesize<={max_size}]/best',
-        'format_sort': ['res:1080', 'ext:mp4:m4a'], # Prevent container mismatches and prioritize compatibility
-        'merge_output_format': 'mp4',
+        'format': fmt,
+        'format_sort': ['res:1080', 'ext:mp4:m4a'], 
+        'merge_output_format': 'mp4' if has_ffmpeg else None,
         'concurrent_fragment_downloads': 10,
-        'sleep_interval_requests': 1, # Rate-limit bypass for manifest requests
+        'sleep_interval_requests': 1, 
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
@@ -49,9 +55,6 @@ def get_base_opts():
         'writesubtitles': False,
         'writeautomaticsub': False,
         'writethumbnail': False,
-        'postprocessor_args': {
-            'Merger': ['-threads', '0', '-preset', 'ultrafast']
-        },
         'http_headers': {
             'User-Agent': random.choice(USER_AGENTS),
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -64,6 +67,12 @@ def get_base_opts():
         },
         'socket_timeout': 15,
     }
+    
+    if has_ffmpeg:
+        opts['postprocessor_args'] = {
+            'Merger': ['-threads', '0', '-preset', 'ultrafast']
+        }
+        
     if COOKIE_FILE:
         opts['cookiefile'] = COOKIE_FILE
     return opts
@@ -71,9 +80,10 @@ def get_base_opts():
 async def get_media_info(url: str) -> dict:
     def _extract():
         retries = 2
+        last_error = None
         for attempt in range(retries):
             opts = get_base_opts()
-            opts['extract_flat'] = False # We need duration
+            opts['extract_flat'] = False 
             
             if attempt > 0:
                 opts['http_headers']['User-Agent'] = random.choice(USER_AGENTS)
@@ -87,8 +97,20 @@ async def get_media_info(url: str) -> dict:
                     info = ydl.extract_info(url, download=False)
                     if info:
                         return info
-                except Exception:
+                except Exception as e:
+                    last_error = e
                     continue
+        
+        if last_error:
+            err_msg = str(last_error).lower()
+            if 'private' in err_msg or 'deleted' in err_msg or 'unavailable' in err_msg or 'not found' in err_msg:
+                raise ValueError("private_video")
+            elif 'timeout' in err_msg or 'network' in err_msg or 'timed out' in err_msg:
+                raise ValueError("timeout")
+            elif 'sign in' in err_msg or 'login' in err_msg:
+                raise ValueError("login_required")
+            raise last_error
+            
         return {}
 
     return await asyncio.to_thread(_extract)
@@ -101,20 +123,22 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
             
         retries = 3
         last_error = None
+        has_ffmpeg = shutil.which('ffmpeg') is not None
         
         for attempt in range(retries):
             opts = get_base_opts()
             
             if is_audio:
                 opts['format'] = 'bestaudio/best'
-                opts['postprocessors'] = [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }]
-                opts['postprocessor_args'] = {
-                    'ffmpeg': ['-af', 'volume=2.5,dynaudnorm', '-threads', '0']
-                }
+                if has_ffmpeg:
+                    opts['postprocessors'] = [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }]
+                    opts['postprocessor_args'] = {
+                        'ffmpeg': ['-af', 'volume=2.5,dynaudnorm', '-threads', '0']
+                    }
                 opts['outtmpl'] = os.path.join(temp_dir, 'VidSaveUzBot.%(ext)s')
             else:
                 opts['outtmpl'] = os.path.join(temp_dir, f'{dl_uuid}_%(extractor)s_%(id)s_%(playlist_index|)s.%(ext)s')
@@ -138,7 +162,7 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                             if not entry:
                                 continue
                             filepath = ydl.prepare_filename(entry)
-                            if is_audio:
+                            if is_audio and has_ffmpeg:
                                 filepath = os.path.splitext(filepath)[0] + '.mp3'
                             else:
                                 req_dl = entry.get('requested_downloads')
@@ -150,12 +174,12 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                                 results.append({
                                     'filepath': filepath,
                                     'title': entry.get('title', 'Media')[:100],
-                                    'ext': 'mp3' if is_audio else entry.get('ext', 'mp4'),
+                                    'ext': 'mp3' if (is_audio and has_ffmpeg) else entry.get('ext', 'mp4'),
                                     'track_info': track_info
                                 })
                     else:
                         filepath = ydl.prepare_filename(info)
-                        if is_audio:
+                        if is_audio and has_ffmpeg:
                             filepath = os.path.splitext(filepath)[0] + '.mp3'
                         else:
                             req_dl = info.get('requested_downloads')
@@ -167,7 +191,7 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                             results.append({
                                 'filepath': filepath,
                                 'title': info.get('title', 'Media')[:100],
-                                'ext': 'mp3' if is_audio else info.get('ext', 'mp4'),
+                                'ext': 'mp3' if (is_audio and has_ffmpeg) else info.get('ext', 'mp4'),
                                 'track_info': track_info
                             })
                     return results

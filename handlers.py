@@ -260,6 +260,20 @@ async def handle_media_url(message: Message, url_match: re.Match):
             ])
             await wait_msg.delete()
             await message.reply("Qaysi formatda yuklab olamiz? / Выберите формат: / Choose format:", reply_markup=markup)
+    except ValueError as ve:
+        if wait_msg:
+            try:
+                await wait_msg.delete()
+            except:
+                pass
+        err_key = str(ve)
+        try:
+            if err_key in ["private_video", "timeout", "login_required"]:
+                await message.reply(await get_text(message.from_user.id, err_key))
+            else:
+                await message.reply(await get_text(message.from_user.id, "error"))
+        except:
+            pass
     except Exception as e:
         if wait_msg:
             try:
