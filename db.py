@@ -11,7 +11,11 @@ async def init_db():
         return
     
     try:
-        pool = await asyncpg.create_pool(config.database_url)
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        pool = await asyncpg.create_pool(config.database_url, ssl=ctx)
         async with pool.acquire() as conn:
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS users (

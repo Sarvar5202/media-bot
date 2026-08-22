@@ -23,7 +23,7 @@ import asyncio
 router = Router()
 
 URL_PATTERN = re.compile(
-    r'(https?://(?:www\.)?(?:instagram\.com|tiktok\.com|youtube\.com|youtu\.be|x\.com|twitter\.com|facebook\.com|pin\.it|pinterest\.com)[^\s]+)'
+    r'(https?://(?:www\.)?(?:instagram\.com|tiktok\.com|youtube\.com|youtu\.be|x\.com|twitter\.com|facebook\.com|pin\.it|pinterest\.com)[a-zA-Z0-9_\-\./\?=&%]+)'
 )
 
 USER_LANGS = {}
@@ -393,13 +393,23 @@ async def execute_download_and_send(url: str, url_hash: str, is_audio: bool, use
         return True
     except ValueError as ve:
         err_key = str(ve)
-        if err_key in ["private_video", "timeout", "login_required"]:
-            await bot.send_message(chat_id=chat_id, text=await get_text(user_id, err_key), reply_to_message_id=reply_to_message_id)
-        else:
-            await bot.send_message(chat_id=chat_id, text=await get_text(user_id, "error"), reply_to_message_id=reply_to_message_id)
+        try:
+            if err_key in ["private_video", "timeout", "login_required"]:
+                await bot.send_message(chat_id=chat_id, text=await get_text(user_id, err_key), reply_to_message_id=reply_to_message_id)
+            else:
+                await bot.send_message(chat_id=chat_id, text=await get_text(user_id, "error"), reply_to_message_id=reply_to_message_id)
+        except Exception:
+            pass
+        return False
+    except TelegramForbiddenError:
+        # User blocked the bot
+        await set_user_inactive(user_id)
         return False
     except Exception as e:
-        await bot.send_message(chat_id=chat_id, text=await get_text(user_id, "error"), reply_to_message_id=reply_to_message_id)
+        try:
+            await bot.send_message(chat_id=chat_id, text=await get_text(user_id, "error"), reply_to_message_id=reply_to_message_id)
+        except Exception:
+            pass
         return False
     finally:
         for res in results:

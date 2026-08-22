@@ -83,6 +83,9 @@ async def main():
     # Start cache cleanup task
     asyncio.create_task(cache_cleanup_task())
     
+    logging.info("Deleting webhook and dropping pending updates to prevent conflicts...")
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     logging.info("Bot is starting polling... (Clean Rebuild V3)")
     await dp.start_polling(bot)
 
