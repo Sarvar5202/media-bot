@@ -129,6 +129,8 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
             with yt_dlp.YoutubeDL(opts) as ydl:
                 try:
                     info = ydl.extract_info(url, download=True)
+                    if not info:
+                        continue
                     
                     results = []
                     if 'entries' in info:
@@ -139,7 +141,9 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                             if is_audio:
                                 filepath = os.path.splitext(filepath)[0] + '.mp3'
                             else:
-                                filepath = entry.get('requested_downloads', [{}])[0].get('filepath', filepath)
+                                req_dl = entry.get('requested_downloads')
+                                if req_dl and isinstance(req_dl, list) and len(req_dl) > 0:
+                                    filepath = req_dl[0].get('filepath', filepath)
                             
                             if os.path.exists(filepath):
                                 track_info = entry.get('artist') and entry.get('track') and f"{entry.get('artist')} - {entry.get('track')}" or entry.get('track') or entry.get('artist')
@@ -154,7 +158,9 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                         if is_audio:
                             filepath = os.path.splitext(filepath)[0] + '.mp3'
                         else:
-                            filepath = info.get('requested_downloads', [{}])[0].get('filepath', filepath)
+                            req_dl = info.get('requested_downloads')
+                            if req_dl and isinstance(req_dl, list) and len(req_dl) > 0:
+                                filepath = req_dl[0].get('filepath', filepath)
                             
                         if os.path.exists(filepath):
                             track_info = info.get('artist') and info.get('track') and f"{info.get('artist')} - {info.get('track')}" or info.get('track') or info.get('artist')

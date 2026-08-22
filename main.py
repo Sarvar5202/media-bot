@@ -87,7 +87,21 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     
     logging.info("Bot is starting polling... (Clean Rebuild V3)")
-    await dp.start_polling(bot)
+    while True:
+        try:
+            await dp.start_polling(bot, handle_signals=False)
+            break
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "conflict" in err_msg or "terminated by other getupdates request" in err_msg:
+                logging.error("Conflict error. Another instance is polling. Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+            elif "network" in err_msg or "timeout" in err_msg or "clientoserror" in err_msg:
+                logging.error(f"Network error during polling: {e}. Retrying in 5s...")
+                await asyncio.sleep(5)
+            else:
+                logging.error(f"Unexpected polling error: {e}. Retrying in 5s...")
+                await asyncio.sleep(5)
 
 if __name__ == "__main__":
     if sys.platform == 'win32':

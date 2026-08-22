@@ -237,31 +237,39 @@ async def cmd_broadcast(message: Message):
 
 @router.message(F.text.regexp(URL_PATTERN).as_("url_match"))
 async def handle_media_url(message: Message, url_match: re.Match):
-    url = url_match.group(1)
-    url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
-    await URL_CACHE.set(url_hash, url)
-    
-    wait_msg = await message.reply(await get_text(message.from_user.id, "wait"))
-    
-    info = await get_media_info(url)
-    duration = info.get('duration', None)
-    
-    if duration is not None and duration <= 300:
-        # Fast-track path: download both video and audio concurrently
-        # Since running both might be heavy, we can do them sequentially or concurrently.
-        # Let's do sequentially to avoid hitting limits or TempDir clashes too fast, actually yt-dlp isolates downloads safely.
-        await wait_msg.delete()
-        task1 = execute_download_and_send(url, url_hash, False, message.from_user.id, message.bot, message.chat.id, message.message_id)
-        task2 = execute_download_and_send(url, url_hash, True, message.from_user.id, message.bot, message.chat.id, message.message_id)
-        await asyncio.gather(task1, task2)
-    else:
-        # Interactive path
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📥 Videoni yuklab olish", callback_data=f"dl_vid|{url_hash}")],
-            [InlineKeyboardButton(text="🎵 MP3 (Ovozni kuchaytirish)", callback_data=f"dl_aud|{url_hash}")]
-        ])
-        await wait_msg.delete()
-        await message.reply("Qaysi formatda yuklab olamiz? / Выберите формат: / Choose format:", reply_markup=markup)
+    wait_msg = None
+    try:
+        url = url_match.group(1)
+        url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
+        await URL_CACHE.set(url_hash, url)
+        
+        wait_msg = await message.reply(await get_text(message.from_user.id, "wait"))
+        
+        info = await get_media_info(url)
+        duration = info.get('duration', None) if info else None
+        
+        if duration is not None and duration <= 300:
+            await wait_msg.delete()
+            task1 = execute_download_and_send(url, url_hash, False, message.from_user.id, message.bot, message.chat.id, message.message_id)
+            task2 = execute_download_and_send(url, url_hash, True, message.from_user.id, message.bot, message.chat.id, message.message_id)
+            await asyncio.gather(task1, task2)
+        else:
+            markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📥 Videoni yuklab olish", callback_data=f"dl_vid|{url_hash}")],
+                [InlineKeyboardButton(text="🎵 MP3 (Ovozni kuchaytirish)", callback_data=f"dl_aud|{url_hash}")]
+            ])
+            await wait_msg.delete()
+            await message.reply("Qaysi formatda yuklab olamiz? / Выберите формат: / Choose format:", reply_markup=markup)
+    except Exception as e:
+        if wait_msg:
+            try:
+                await wait_msg.delete()
+            except:
+                pass
+        try:
+            await message.reply(await get_text(message.from_user.id, "error"))
+        except:
+            pass
 
 async def execute_download_and_send(url: str, url_hash: str, is_audio: bool, user_id: int, bot, chat_id: int, reply_to_message_id: int, status_msg_to_delete=None):
     platform = 'Boshqa'
