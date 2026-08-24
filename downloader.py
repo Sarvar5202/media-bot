@@ -83,6 +83,9 @@ def get_base_opts(url=""):
     return opts
 
 async def get_media_info(url: str) -> dict:
+    if 'instagram' in url.lower():
+        return {"title": "Instagram Media", "duration": 0}
+        
     def _extract():
         retries = 2
         last_error = None
@@ -92,8 +95,6 @@ async def get_media_info(url: str) -> dict:
             
             if attempt > 0:
                 opts['http_headers']['User-Agent'] = random.choice(USER_AGENTS)
-                if 'instagram' in url:
-                    opts['sleep_interval_requests'] = 2 * attempt
                 if 'youtube' in url:
                     opts['extractor_args'] = {'youtube': ['player_client=ios,tv,web', 'player_skip=webpage']}
 
@@ -106,9 +107,6 @@ async def get_media_info(url: str) -> dict:
                     last_error = e
                     continue
         
-        if 'instagram' in url.lower():
-            # If yt-dlp fails to extract info for instagram, return a dummy fallback info
-            return {"title": "Instagram Media", "duration": 0}
             
         if last_error:
             err_msg = str(last_error).lower()
@@ -125,6 +123,74 @@ async def get_media_info(url: str) -> dict:
     return await asyncio.to_thread(_extract)
 
 async def download_media(url: str, is_audio: bool = False, temp_dir: str = "downloads") -> list[dict]:
+    if 'instagram' in url.lower():
+        import aiohttp
+        import json
+        import urllib.parse
+        import re
+        import uuid
+        
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir, exist_ok=True)
+            
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "X-Requested-With": "XMLHttpRequest"
+        }
+        payload = {"q": url, "t": "media", "lang": "en"}
+        
+        endpoints = [
+            ("https://saveig.app/api/ajaxSearch", "https://saveig.app"),
+            ("https://v3.igdownloader.app/api/ajaxSearch", "https://v3.igdownloader.app")
+        ]
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                for endpoint, origin in endpoints:
+                    headers["Origin"] = origin
+                    headers["Referer"] = f"{origin}/en"
+                    
+                    try:
+                        async with session.post(endpoint, data=urllib.parse.urlencode(payload), headers=headers, timeout=15) as resp:
+                            if resp.status == 200:
+                                resp_text = await resp.text()
+                                try:
+                                    json_data = json.loads(resp_text)
+                                except json.JSONDecodeError:
+                                    continue
+                                    
+                                html_data = json_data.get("data", "")
+                                urls = re.findall(r'href="([^"]+)"', html_data)
+                                download_urls = [u for u in urls if 'scontent' in u or 'cdninstagram' in u or '.mp4' in u or 'dl=' in u]
+                                
+                                if download_urls:
+                                    results = []
+                                    for idx, dl_url in enumerate(download_urls[:10]):
+                                        ext = 'mp3' if is_audio else 'mp4'
+                                        if '.jpg' in dl_url or '.webp' in dl_url or 'stp=dst-jpg' in dl_url:
+                                            ext = 'jpg'
+                                        filepath = os.path.join(temp_dir, f"{str(uuid.uuid4())[:8]}_ig_{idx}.{ext}")
+                                        
+                                        async with session.get(dl_url, timeout=30) as file_resp:
+                                            if file_resp.status == 200:
+                                                with open(filepath, 'wb') as f:
+                                                    f.write(await file_resp.read())
+                                                results.append({
+                                                    'filepath': filepath,
+                                                    'title': 'Instagram Media',
+                                                    'ext': ext,
+                                                    'track_info': None
+                                                })
+                                    if results:
+                                        return results
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        raise ValueError("error")
+
     def _download():
         dl_uuid = str(uuid.uuid4())[:8]
         if not os.path.exists(temp_dir):
@@ -154,8 +220,6 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
             
             if attempt > 0:
                 opts['http_headers']['User-Agent'] = random.choice(USER_AGENTS)
-                if 'instagram' in url:
-                    opts['sleep_interval_requests'] = 2 * attempt
                 if 'youtube' in url:
                     opts['extractor_args'] = {'youtube': ['player_client=ios,tv,web', 'player_skip=webpage']}
 
@@ -205,8 +269,6 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                             })
                     if results:
                         return results
-                    elif 'instagram' in url.lower():
-                        raise RuntimeError("fallback_required")
                 
                 except yt_dlp.utils.DownloadError as e:
                     last_error = e
@@ -214,9 +276,6 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                 except Exception as e:
                     last_error = e
                     break
-
-        if 'instagram' in url.lower():
-            raise RuntimeError("fallback_required")
             
         if last_error:
             err_msg = str(last_error).lower()
@@ -229,72 +288,4 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
             raise last_error
         return []
 
-    try:
-        return await asyncio.to_thread(_download)
-    except RuntimeError as e:
-        if str(e) == "fallback_required":
-            import aiohttp
-            import json
-            import urllib.parse
-            import re
-            
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "Accept": "application/json, text/javascript, */*; q=0.01",
-                "X-Requested-With": "XMLHttpRequest"
-            }
-            payload = {"q": url, "t": "media", "lang": "en"}
-            
-            endpoints = [
-                ("https://saveig.app/api/ajaxSearch", "https://saveig.app"),
-                ("https://v3.igdownloader.app/api/ajaxSearch", "https://v3.igdownloader.app")
-            ]
-            
-            try:
-                async with aiohttp.ClientSession() as session:
-                    for endpoint, origin in endpoints:
-                        headers["Origin"] = origin
-                        headers["Referer"] = f"{origin}/en"
-                        
-                        try:
-                            async with session.post(endpoint, data=urllib.parse.urlencode(payload), headers=headers, timeout=15) as resp:
-                                if resp.status == 200:
-                                    resp_text = await resp.text()
-                                    try:
-                                        json_data = json.loads(resp_text)
-                                    except json.JSONDecodeError:
-                                        continue
-                                        
-                                    html_data = json_data.get("data", "")
-                                    urls = re.findall(r'href="([^"]+)"', html_data)
-                                    download_urls = [u for u in urls if 'scontent' in u or 'cdninstagram' in u or '.mp4' in u or 'dl=' in u]
-                                    
-                                    if download_urls:
-                                        results = []
-                                        # Only download the first matching media if not doing a full scrape
-                                        # Or download all if there are multiple (like a carousel)
-                                        for idx, dl_url in enumerate(download_urls[:10]):
-                                            ext = 'mp3' if is_audio else 'mp4'
-                                            if '.jpg' in dl_url or '.webp' in dl_url or 'stp=dst-jpg' in dl_url:
-                                                ext = 'jpg'
-                                            filepath = os.path.join(temp_dir, f"{str(uuid.uuid4())[:8]}_fallback_{idx}.{ext}")
-                                            
-                                            async with session.get(dl_url, timeout=30) as file_resp:
-                                                if file_resp.status == 200:
-                                                    with open(filepath, 'wb') as f:
-                                                        f.write(await file_resp.read())
-                                                    results.append({
-                                                        'filepath': filepath,
-                                                        'title': 'Instagram Media',
-                                                        'ext': ext,
-                                                        'track_info': None
-                                                    })
-                                        if results:
-                                            return results
-                        except Exception:
-                            continue
-            except Exception:
-                pass
-            raise ValueError("error")
-        raise e
+    return await asyncio.to_thread(_download)
