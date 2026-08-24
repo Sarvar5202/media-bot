@@ -1,4 +1,4 @@
-﻿TEXTS = {
+TEXTS = {
     'uz': {
         'start': "👋 Assalomu alaykum! Menga Instagram, TikTok, YouTube, X/Twitter, Pinterest yoki Facebook havolasini yuboring, uni darhol yuklab beraman. 🚀",
         'help': (
@@ -16,7 +16,7 @@
             "Takliflar, savollar yoki xatoliklar bo'lsa murojaat qiling: <a href='https://t.me/ssamariddinovv'>@ssamariddinovv</a>"
         ),
         'wait': "⏳",
-        'error': "❌ Kechirasiz, media topilmadi yoki bu post yopiq/xususiy.",
+        'error': "❌ Kechirasiz, videoni yuklab bo'lmadi",
         'private_video': "🔒 Kechirasiz, bu video yopiq (xususiy) yoki o'chirib tashlangan.",
         'timeout': "⏱ Yuklab olish vaqti tugadi yoki tarmoq xatosi yuz berdi. Iltimos qaytadan urinib ko'ring.",
         'login_required': "🔐 Bu videoni yuklab olish uchun akkauntga kirish talab qilinadi. Buni yuklab ololmayman.",
