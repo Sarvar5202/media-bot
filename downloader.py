@@ -30,8 +30,6 @@ def setup_cookies():
         
     return None
 
-COOKIE_FILE = setup_cookies()
-
 from config import config
 
 import shutil
@@ -73,11 +71,9 @@ def get_base_opts(url=""):
         'socket_timeout': 15,
     }
     
-    session_id = os.getenv("IG_SESSIONID")
-    if session_id and 'instagram' in url.lower():
-        opts['http_headers']['Cookie'] = f"sessionid={session_id};"
-    elif COOKIE_FILE and os.path.exists(COOKIE_FILE):
-        opts['cookiefile'] = COOKIE_FILE
+    cookie_file = setup_cookies()
+    if cookie_file and os.path.exists(cookie_file):
+        opts['cookiefile'] = cookie_file
         
     if has_ffmpeg:
         opts['postprocessor_args'] = {
