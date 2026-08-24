@@ -13,7 +13,7 @@ USER_AGENTS = [
 ]
 
 def setup_cookies():
-    cookie_path = "cookies.txt"
+    cookie_path = os.path.abspath("cookies.txt")
     cookies_content = os.getenv("IG_COOKIES")
     if cookies_content:
         with open(cookie_path, "w") as f:
@@ -36,7 +36,7 @@ from config import config
 
 import shutil
 
-def get_base_opts():
+def get_base_opts(url=""):
     max_size = '2000M' if config.local_api_server_url else '50M'
     has_ffmpeg = shutil.which('ffmpeg') is not None
     
@@ -48,7 +48,7 @@ def get_base_opts():
         'merge_output_format': 'mp4' if has_ffmpeg else None,
         'concurrent_fragment_downloads': 10,
         'sleep_interval_requests': 1, 
-        'noplaylist': True,
+        'noplaylist': 'instagram' not in url.lower(),
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
@@ -59,7 +59,9 @@ def get_base_opts():
             'User-Agent': random.choice(USER_AGENTS),
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-us,en;q=0.5',
-            'Sec-Fetch-Mode': 'navigate'
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Dest': 'document'
         },
         'extractor_args': {
             'youtube': ['player_client=android,mweb,web', 'player_skip=webpage'],
@@ -73,7 +75,7 @@ def get_base_opts():
             'Merger': ['-threads', '0', '-preset', 'ultrafast']
         }
         
-    if COOKIE_FILE:
+    if COOKIE_FILE and os.path.exists(COOKIE_FILE):
         opts['cookiefile'] = COOKIE_FILE
     return opts
 
@@ -82,7 +84,7 @@ async def get_media_info(url: str) -> dict:
         retries = 2
         last_error = None
         for attempt in range(retries):
-            opts = get_base_opts()
+            opts = get_base_opts(url)
             opts['extract_flat'] = False 
             
             if attempt > 0:
@@ -126,7 +128,7 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
         has_ffmpeg = shutil.which('ffmpeg') is not None
         
         for attempt in range(retries):
-            opts = get_base_opts()
+            opts = get_base_opts(url)
             
             if is_audio:
                 opts['format'] = 'bestaudio/best'
