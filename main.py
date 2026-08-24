@@ -84,7 +84,10 @@ async def main():
     asyncio.create_task(cache_cleanup_task())
     
     logging.info("Deleting webhook and dropping pending updates to prevent conflicts...")
-    await bot.delete_webhook(drop_pending_updates=True)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logging.warning(f"Failed to delete webhook (safe to ignore): {e}")
     
     logging.info("Bot is starting polling... (Clean Rebuild V3)")
     while True:

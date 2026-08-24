@@ -16,38 +16,65 @@ async def init_db():
         
     try:
         import ssl
+        import socket
+        from urllib.parse import urlparse
+        
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        pool = await asyncpg.create_pool(db_url, ssl=ctx)
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    user_id BIGINT PRIMARY KEY,
-                    username TEXT,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    last_active TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            try:
-                await conn.execute("ALTER TABLE users ADD COLUMN lang VARCHAR(10) DEFAULT 'uz'")
-            except asyncpg.exceptions.DuplicateColumnError:
-                pass
+        
+        kwargs = {}
+        try:
+            parsed = urlparse(db_url)
+            if parsed.hostname:
+                addr_info = socket.getaddrinfo(parsed.hostname, parsed.port or 5432, socket.AF_INET)
+                if addr_info:
+                    kwargs['host'] = addr_info[0][4][0]
+        except Exception as e:
+            logging.warning(f"Could not resolve IPv4 for DB host: {e}")
             
-            try:
-                await conn.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
-            except asyncpg.exceptions.DuplicateColumnError:
-                pass
-            
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS platform_stats (
-                    platform VARCHAR(50) PRIMARY KEY,
-                    downloads BIGINT DEFAULT 0
-                )
-            """)
+        pool = await asyncpg.create_pool(db_url, ssl=ctx, **kwargs)
+        logging.info("Connected to PostgreSQL database successfully.")
     except Exception as e:
-        logging.error(f"Failed to initialize database: {e}")
+        logging.error(f"Failed to initialize PostgreSQL: {e}. Falling back to SQLite...")
+        try:
+            from sqlite_mock import SQLitePool
+            pool = SQLitePool()
+            logging.info("SQLite fallback database initialized successfully.")
+        except Exception as e2:
+            logging.error(f"Failed to initialize SQLite fallback: {e2}")
+            return
+            
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id BIGINT PRIMARY KEY,
+                        username TEXT,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        last_active TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                try:
+                    await conn.execute("ALTER TABLE users ADD COLUMN lang VARCHAR(10) DEFAULT 'uz'")
+                except Exception:
+                    pass
+                
+                try:
+                    await conn.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
+                except Exception:
+                    pass
+                
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS platform_stats (
+                        platform VARCHAR(50) PRIMARY KEY,
+                        downloads BIGINT DEFAULT 0
+                    )
+                """)
+        except Exception as e:
+            logging.error(f"Failed to run database migrations: {e}")
 
 async def add_user(user_id: int, username: str = None, full_name: str = None):
     if not pool: return
