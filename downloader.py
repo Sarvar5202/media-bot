@@ -235,50 +235,65 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
         if str(e) == "fallback_required":
             import aiohttp
             import json
+            import urllib.parse
+            import re
+            
             headers = {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Origin': 'https://cobalt.tools',
-                'Referer': 'https://cobalt.tools/'
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "X-Requested-With": "XMLHttpRequest"
             }
-            payload = {
-                "url": url,
-                "isAudioOnly": is_audio,
-                "aFormat": "mp3" if is_audio else "best"
-            }
+            payload = {"q": url, "t": "media", "lang": "en"}
+            
+            endpoints = [
+                ("https://saveig.app/api/ajaxSearch", "https://saveig.app"),
+                ("https://v3.igdownloader.app/api/ajaxSearch", "https://v3.igdownloader.app")
+            ]
+            
             try:
-                async with aiohttp.ClientSession(headers=headers) as session:
-                    async with session.post("https://api.cobalt.tools/", json=payload, timeout=20) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            urls_to_download = []
-                            status = data.get("status")
-                            if status in ["stream", "redirect"]:
-                                urls_to_download.append(data.get("url"))
-                            elif status == "picker":
-                                for item in data.get("picker", []):
-                                    urls_to_download.append(item.get("url"))
+                async with aiohttp.ClientSession() as session:
+                    for endpoint, origin in endpoints:
+                        headers["Origin"] = origin
+                        headers["Referer"] = f"{origin}/en"
+                        
+                        try:
+                            async with session.post(endpoint, data=urllib.parse.urlencode(payload), headers=headers, timeout=15) as resp:
+                                if resp.status == 200:
+                                    resp_text = await resp.text()
+                                    try:
+                                        json_data = json.loads(resp_text)
+                                    except json.JSONDecodeError:
+                                        continue
+                                        
+                                    html_data = json_data.get("data", "")
+                                    urls = re.findall(r'href="([^"]+)"', html_data)
+                                    download_urls = [u for u in urls if 'scontent' in u or 'cdninstagram' in u or '.mp4' in u or 'dl=' in u]
                                     
-                            results = []
-                            for dl_url in urls_to_download:
-                                ext = 'mp3' if is_audio else 'mp4'
-                                if '.jpg' in dl_url or '.webp' in dl_url:
-                                    ext = 'jpg'
-                                filepath = os.path.join(temp_dir, f"{str(uuid.uuid4())[:8]}_fallback.{ext}")
-                                
-                                async with session.get(dl_url) as file_resp:
-                                    if file_resp.status == 200:
-                                        with open(filepath, 'wb') as f:
-                                            f.write(await file_resp.read())
-                                        results.append({
-                                            'filepath': filepath,
-                                            'title': 'Instagram Media',
-                                            'ext': ext,
-                                            'track_info': None
-                                        })
-                            if results:
-                                return results
+                                    if download_urls:
+                                        results = []
+                                        # Only download the first matching media if not doing a full scrape
+                                        # Or download all if there are multiple (like a carousel)
+                                        for idx, dl_url in enumerate(download_urls[:10]):
+                                            ext = 'mp3' if is_audio else 'mp4'
+                                            if '.jpg' in dl_url or '.webp' in dl_url or 'stp=dst-jpg' in dl_url:
+                                                ext = 'jpg'
+                                            filepath = os.path.join(temp_dir, f"{str(uuid.uuid4())[:8]}_fallback_{idx}.{ext}")
+                                            
+                                            async with session.get(dl_url, timeout=30) as file_resp:
+                                                if file_resp.status == 200:
+                                                    with open(filepath, 'wb') as f:
+                                                        f.write(await file_resp.read())
+                                                    results.append({
+                                                        'filepath': filepath,
+                                                        'title': 'Instagram Media',
+                                                        'ext': ext,
+                                                        'track_info': None
+                                                    })
+                                        if results:
+                                            return results
+                        except Exception:
+                            continue
             except Exception:
                 pass
             raise ValueError("error")

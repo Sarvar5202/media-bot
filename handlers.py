@@ -250,9 +250,7 @@ async def handle_media_url(message: Message, url_match: re.Match):
         
         if duration is not None and duration <= 300:
             await wait_msg.delete()
-            task1 = execute_download_and_send(url, url_hash, False, message.from_user.id, message.bot, message.chat.id, message.message_id)
-            task2 = execute_download_and_send(url, url_hash, True, message.from_user.id, message.bot, message.chat.id, message.message_id)
-            await asyncio.gather(task1, task2)
+            await execute_download_and_send(url, url_hash, False, message.from_user.id, message.bot, message.chat.id, message.message_id)
         else:
             markup = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📥 Videoni yuklab olish", callback_data=f"dl_vid|{url_hash}")],
