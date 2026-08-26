@@ -90,20 +90,54 @@ async def main():
         logging.warning(f"Failed to delete webhook (safe to ignore): {e}")
     
     logging.info("Bot is starting polling...")
-    try:
-        await dp.start_polling(bot)
-    except asyncio.CancelledError:
-        logging.info("Polling task was cancelled.")
-    except Exception as e:
-        logging.error(f"Polling error: {e}")
-    finally:
-        await bot.session.close()
-        logging.info("Bot session closed successfully.")
+    while True:
+        try:
+            await dp.start_polling(bot)
+            break
+        except asyncio.CancelledError:
+            logging.info("Polling task was cancelled.")
+            break
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "conflict" in err_msg or "terminated by other getupdates request" in err_msg:
+                logging.error("Conflict error. Another instance is polling. Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+            elif "network" in err_msg or "timeout" in err_msg or "clientoserror" in err_msg:
+                logging.error(f"Network error during polling: {e}. Retrying in 5s...")
+                await asyncio.sleep(5)
+            else:
+                logging.error(f"Unexpected polling error: {e}. Retrying in 5s...")
+                await asyncio.sleep(5)
+    
+    await bot.session.close()
+    logging.info("Bot session closed successfully.")
+
+def setup_signal_handlers():
+    import signal
+    loop = asyncio.get_event_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, loop)))
+        except NotImplementedError:
+            pass # Windows doesn't support add_signal_handler
+
+async def shutdown(sig, loop):
+    logging.info(f"Received signal {sig}, initiating graceful shutdown...")
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    [task.cancel() for task in tasks]
+    logging.info(f"Cancelling {len(tasks)} outstanding tasks")
+    await asyncio.gather(*tasks, return_exceptions=True)
+    loop.stop()
 
 if __name__ == "__main__":
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     try:
-        asyncio.run(main())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        setup_signal_handlers()
+        loop.run_until_complete(main())
     except (KeyboardInterrupt, SystemExit):
         logging.info("Application stopped gracefully.")
+    finally:
+        loop.close()

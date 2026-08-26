@@ -8,31 +8,36 @@ async def init_db():
     global pool
     db_url = config.database_url
     if not db_url:
-        logging.warning("DATABASE_URL is not set. Database features will be disabled.")
-        return
-    
-    if db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql://", 1)
-        
-    try:
-        import ssl
-        
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        
-        pool = await asyncpg.create_pool(db_url, ssl=ctx)
-        logging.info("Connected to PostgreSQL database successfully.")
-    except Exception as e:
-        logging.error(f"Failed to initialize PostgreSQL: {e}. Falling back to SQLite...")
+        logging.warning("DATABASE_URL is not set. Falling back to SQLite...")
         try:
             from sqlite_mock import SQLitePool
             pool = SQLitePool()
             logging.info("SQLite fallback database initialized successfully.")
-        except Exception as e2:
-            logging.error(f"Failed to initialize SQLite fallback: {e2}")
+        except Exception as e:
+            logging.error(f"Failed to initialize SQLite fallback: {e}")
             return
+    else:
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
             
+        try:
+            import ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            pool = await asyncpg.create_pool(db_url, ssl=ctx)
+            logging.info("Connected to PostgreSQL database successfully.")
+        except Exception as e:
+            logging.error(f"Failed to initialize PostgreSQL: {e}. Falling back to SQLite...")
+            try:
+                from sqlite_mock import SQLitePool
+                pool = SQLitePool()
+                logging.info("SQLite fallback database initialized successfully.")
+            except Exception as e2:
+                logging.error(f"Failed to initialize SQLite fallback: {e2}")
+                return
+                
     if pool:
         try:
             async with pool.acquire() as conn:

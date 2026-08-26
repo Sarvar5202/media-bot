@@ -244,6 +244,34 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
             
             async with aiohttp.ClientSession() as session:
                 try:
+                    cobalt_url = "https://co.wuk.sh/api/json"
+                    headers = {
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                    }
+                    payload = {"url": url}
+                    async with session.post(cobalt_url, json=payload, headers=headers, timeout=15) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data.get("url"):
+                                dl_url = data["url"]
+                                ext = 'mp3' if is_audio else 'mp4'
+                                filepath = os.path.join(temp_dir, f"{str(uuid.uuid4())[:8]}_cobalt.{ext}")
+                                async with session.get(dl_url, timeout=30) as file_resp:
+                                    if file_resp.status == 200:
+                                        with open(filepath, 'wb') as f:
+                                            f.write(await file_resp.read())
+                                        results.append({
+                                            'filepath': filepath,
+                                            'title': 'Media',
+                                            'ext': ext,
+                                            'track_info': None
+                                        })
+                                        return results
+                except Exception:
+                    pass
+
+                try:
                     vkr_url = f"https://api.vkrdownloader.vercel.app/server?vkr={url}"
                     async with session.get(vkr_url, timeout=15) as resp:
                         if resp.status == 200:
