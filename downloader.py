@@ -14,18 +14,19 @@ USER_AGENTS = [
 
 def setup_cookies():
     cookie_path = os.path.abspath("cookies.txt")
-    cookies_content = os.getenv("IG_COOKIES")
-    if cookies_content:
-        with open(cookie_path, "w") as f:
-            f.write(cookies_content)
-        return cookie_path
     
-    session_id = os.getenv("IG_SESSIONID")
+    session_id = os.getenv("INSTAGRAM_COOKIES") or os.getenv("IG_SESSIONID")
     if session_id:
         netscape_cookie = f".instagram.com\tTRUE\t/\tTRUE\t253402300799\tsessionid\t{session_id}\n"
         with open(cookie_path, "w") as f:
             f.write("# Netscape HTTP Cookie File\n")
             f.write(netscape_cookie)
+        return cookie_path
+        
+    cookies_content = os.getenv("IG_COOKIES")
+    if cookies_content:
+        with open(cookie_path, "w") as f:
+            f.write(cookies_content)
         return cookie_path
         
     return None
@@ -83,10 +84,6 @@ def get_base_opts(url=""):
     return opts
 
 async def get_media_info(url: str) -> dict:
-    url_lower = url.lower()
-    if 'instagram' in url_lower or 'pinterest' in url_lower:
-        return {"title": "Media", "duration": 0}
-        
     def _extract():
         retries = 2
         last_error = None
@@ -124,102 +121,9 @@ async def get_media_info(url: str) -> dict:
     return await asyncio.to_thread(_extract)
 
 async def download_media(url: str, is_audio: bool = False, temp_dir: str = "downloads") -> list[dict]:
-    url_lower = url.lower()
-    if 'instagram' in url_lower or 'pinterest' in url_lower:
-        import aiohttp
-        import json
-        import urllib.parse
-        import re
-        import uuid
-        
-        if not os.path.exists(temp_dir):
-            os.makedirs(temp_dir, exist_ok=True)
-            
-        results = []
-        
-        async with aiohttp.ClientSession() as session:
-            # 1. Try vkrdownloader as a universal fallback
-            try:
-                vkr_url = f"https://api.vkrdownloader.vercel.app/server?vkr={url}"
-                async with session.get(vkr_url, timeout=15) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        downloads = data.get("data", {}).get("downloads", [])
-                        if downloads:
-                            dl_url = downloads[0].get("url")
-                            if dl_url:
-                                ext = 'mp3' if is_audio else 'mp4'
-                                if '.jpg' in dl_url or '.webp' in dl_url:
-                                    ext = 'jpg'
-                                filepath = os.path.join(temp_dir, f"{str(uuid.uuid4())[:8]}_vkr.{ext}")
-                                async with session.get(dl_url, timeout=30) as file_resp:
-                                    if file_resp.status == 200:
-                                        with open(filepath, 'wb') as f:
-                                            f.write(await file_resp.read())
-                                        results.append({
-                                            'filepath': filepath,
-                                            'title': 'Media',
-                                            'ext': ext,
-                                            'track_info': None
-                                        })
-                                        return results
-            except Exception:
-                pass
-                
-            # 2. Try saveig/igdownloader for Instagram
-            if 'instagram' in url_lower:
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                    "Accept": "application/json, text/javascript, */*; q=0.01",
-                    "X-Requested-With": "XMLHttpRequest"
-                }
-                payload = {"q": url, "t": "media", "lang": "en"}
-                endpoints = [
-                    ("https://saveig.app/api/ajaxSearch", "https://saveig.app"),
-                    ("https://v3.igdownloader.app/api/ajaxSearch", "https://v3.igdownloader.app")
-                ]
-                
-                for endpoint, origin in endpoints:
-                    headers["Origin"] = origin
-                    headers["Referer"] = f"{origin}/en"
-                    try:
-                        async with session.post(endpoint, data=urllib.parse.urlencode(payload), headers=headers, timeout=15) as resp:
-                            if resp.status == 200:
-                                resp_text = await resp.text()
-                                try:
-                                    json_data = json.loads(resp_text)
-                                except json.JSONDecodeError:
-                                    continue
-                                    
-                                html_data = json_data.get("data", "")
-                                urls = re.findall(r'href="([^"]+)"', html_data)
-                                download_urls = [u for u in urls if 'scontent' in u or 'cdninstagram' in u or '.mp4' in u or 'dl=' in u]
-                                
-                                if download_urls:
-                                    for idx, dl_url in enumerate(download_urls[:10]):
-                                        ext = 'mp3' if is_audio else 'mp4'
-                                        if '.jpg' in dl_url or '.webp' in dl_url or 'stp=dst-jpg' in dl_url:
-                                            ext = 'jpg'
-                                        filepath = os.path.join(temp_dir, f"{str(uuid.uuid4())[:8]}_ig_{idx}.{ext}")
-                                        async with session.get(dl_url, timeout=30) as file_resp:
-                                            if file_resp.status == 200:
-                                                with open(filepath, 'wb') as f:
-                                                    f.write(await file_resp.read())
-                                                results.append({
-                                                    'filepath': filepath,
-                                                    'title': 'Instagram Media',
-                                                    'ext': ext,
-                                                    'track_info': None
-                                                })
-                                    if results:
-                                        return results
-                    except Exception:
-                        continue
-                        
-        raise ValueError("error")
-
     def _download():
+        import uuid
+        import shutil
         dl_uuid = str(uuid.uuid4())[:8]
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir, exist_ok=True)
@@ -251,6 +155,7 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                 if 'youtube' in url:
                     opts['extractor_args'] = {'youtube': ['player_client=ios,tv,web', 'player_skip=webpage']}
 
+            import yt_dlp
             with yt_dlp.YoutubeDL(opts) as ydl:
                 try:
                     info = ydl.extract_info(url, download=True)
@@ -297,6 +202,8 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                             })
                     if results:
                         return results
+                    elif "instagram" in url.lower() or "pinterest" in url.lower():
+                        raise RuntimeError("fallback_required")
                 
                 except yt_dlp.utils.DownloadError as e:
                     last_error = e
@@ -304,6 +211,9 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
                 except Exception as e:
                     last_error = e
                     break
+            
+        if "instagram" in url.lower() or "pinterest" in url.lower():
+            raise RuntimeError("fallback_required")
             
         if last_error:
             err_msg = str(last_error).lower()
@@ -316,4 +226,99 @@ async def download_media(url: str, is_audio: bool = False, temp_dir: str = "down
             raise last_error
         return []
 
-    return await asyncio.to_thread(_download)
+    try:
+        return await asyncio.to_thread(_download)
+    except RuntimeError as e:
+        if str(e) == "fallback_required":
+            url_lower = url.lower()
+            import aiohttp
+            import json
+            import urllib.parse
+            import re
+            import uuid
+            
+            if not os.path.exists(temp_dir):
+                os.makedirs(temp_dir, exist_ok=True)
+                
+            results = []
+            
+            async with aiohttp.ClientSession() as session:
+                try:
+                    vkr_url = f"https://api.vkrdownloader.vercel.app/server?vkr={url}"
+                    async with session.get(vkr_url, timeout=15) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            downloads = data.get("data", {}).get("downloads", [])
+                            if downloads:
+                                dl_url = downloads[0].get("url")
+                                if dl_url:
+                                    ext = 'mp3' if is_audio else 'mp4'
+                                    if '.jpg' in dl_url or '.webp' in dl_url:
+                                        ext = 'jpg'
+                                    filepath = os.path.join(temp_dir, f"{str(uuid.uuid4())[:8]}_vkr.{ext}")
+                                    async with session.get(dl_url, timeout=30) as file_resp:
+                                        if file_resp.status == 200:
+                                            with open(filepath, 'wb') as f:
+                                                f.write(await file_resp.read())
+                                            results.append({
+                                                'filepath': filepath,
+                                                'title': 'Media',
+                                                'ext': ext,
+                                                'track_info': None
+                                            })
+                                            return results
+                except Exception:
+                    pass
+                    
+                if 'instagram' in url_lower:
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        "Accept": "application/json, text/javascript, */*; q=0.01",
+                        "X-Requested-With": "XMLHttpRequest"
+                    }
+                    payload = {"q": url, "t": "media", "lang": "en"}
+                    endpoints = [
+                        ("https://saveig.app/api/ajaxSearch", "https://saveig.app"),
+                        ("https://v3.igdownloader.app/api/ajaxSearch", "https://v3.igdownloader.app")
+                    ]
+                    
+                    for endpoint, origin in endpoints:
+                        headers["Origin"] = origin
+                        headers["Referer"] = f"{origin}/en"
+                        try:
+                            async with session.post(endpoint, data=urllib.parse.urlencode(payload), headers=headers, timeout=15) as resp:
+                                if resp.status == 200:
+                                    resp_text = await resp.text()
+                                    try:
+                                        json_data = json.loads(resp_text)
+                                    except json.JSONDecodeError:
+                                        continue
+                                        
+                                    html_data = json_data.get("data", "")
+                                    urls = re.findall(r'href="([^"]+)"', html_data)
+                                    download_urls = [u for u in urls if 'scontent' in u or 'cdninstagram' in u or '.mp4' in u or 'dl=' in u]
+                                    
+                                    if download_urls:
+                                        for idx, dl_url in enumerate(download_urls[:10]):
+                                            ext = 'mp3' if is_audio else 'mp4'
+                                            if '.jpg' in dl_url or '.webp' in dl_url or 'stp=dst-jpg' in dl_url:
+                                                ext = 'jpg'
+                                            filepath = os.path.join(temp_dir, f"{str(uuid.uuid4())[:8]}_ig_{idx}.{ext}")
+                                            async with session.get(dl_url, timeout=30) as file_resp:
+                                                if file_resp.status == 200:
+                                                    with open(filepath, 'wb') as f:
+                                                        f.write(await file_resp.read())
+                                                    results.append({
+                                                        'filepath': filepath,
+                                                        'title': 'Instagram Media',
+                                                        'ext': ext,
+                                                        'track_info': None
+                                                    })
+                                        if results:
+                                            return results
+                        except Exception:
+                            continue
+                            
+            raise ValueError("error")
+        raise e
