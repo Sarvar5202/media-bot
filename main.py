@@ -89,24 +89,21 @@ async def main():
     except Exception as e:
         logging.warning(f"Failed to delete webhook (safe to ignore): {e}")
     
-    logging.info("Bot is starting polling... (Clean Rebuild V3)")
-    while True:
-        try:
-            await dp.start_polling(bot, handle_signals=False)
-            break
-        except Exception as e:
-            err_msg = str(e).lower()
-            if "conflict" in err_msg or "terminated by other getupdates request" in err_msg:
-                logging.error("Conflict error. Another instance is polling. Retrying in 5 seconds...")
-                await asyncio.sleep(5)
-            elif "network" in err_msg or "timeout" in err_msg or "clientoserror" in err_msg:
-                logging.error(f"Network error during polling: {e}. Retrying in 5s...")
-                await asyncio.sleep(5)
-            else:
-                logging.error(f"Unexpected polling error: {e}. Retrying in 5s...")
-                await asyncio.sleep(5)
+    logging.info("Bot is starting polling...")
+    try:
+        await dp.start_polling(bot)
+    except asyncio.CancelledError:
+        logging.info("Polling task was cancelled.")
+    except Exception as e:
+        logging.error(f"Polling error: {e}")
+    finally:
+        await bot.session.close()
+        logging.info("Bot session closed successfully.")
 
 if __name__ == "__main__":
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Application stopped gracefully.")

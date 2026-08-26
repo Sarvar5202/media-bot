@@ -16,24 +16,12 @@ async def init_db():
         
     try:
         import ssl
-        import socket
-        from urllib.parse import urlparse
         
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         
-        kwargs = {}
-        try:
-            parsed = urlparse(db_url)
-            if parsed.hostname:
-                addr_info = socket.getaddrinfo(parsed.hostname, parsed.port or 5432, socket.AF_INET)
-                if addr_info:
-                    kwargs['host'] = addr_info[0][4][0]
-        except Exception as e:
-            logging.warning(f"Could not resolve IPv4 for DB host: {e}")
-            
-        pool = await asyncpg.create_pool(db_url, ssl=ctx, **kwargs)
+        pool = await asyncpg.create_pool(db_url, ssl=ctx)
         logging.info("Connected to PostgreSQL database successfully.")
     except Exception as e:
         logging.error(f"Failed to initialize PostgreSQL: {e}. Falling back to SQLite...")
